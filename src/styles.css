@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/* Tokens are indirected through `@theme inline` so switching the `.dark` class
+   restyles everything without regenerating utilities. */
+@theme inline {
+  --color-surface: var(--tl-surface);
+  --color-elevated: var(--tl-elevated);
+  --color-line: var(--tl-line);
+  --color-line-strong: var(--tl-line-strong);
+  --color-ink: var(--tl-ink);
+  --color-ink-muted: var(--tl-ink-muted);
+  --color-ink-faint: var(--tl-ink-faint);
+  --color-accent: var(--tl-accent);
+  --color-accent-soft: var(--tl-accent-soft);
+  --color-warn: var(--tl-warn);
+}
+
+/* These two must stay in step with `overlay.rs`: the window is sized as
+   chrome + rows * ROW_HEIGHT, and this is what draws that height. */
+:root {
+  --tl-row: 38px;
+  --tl-shadow: 22px;
+}
+
+:root {
+  --tl-surface: #f7f8fa;
+  --tl-elevated: #ffffff;
+  --tl-line: #e3e6ec;
+  --tl-line-strong: #ccd2db;
+  --tl-ink: #16191f;
+  --tl-ink-muted: #5b6472;
+  --tl-ink-faint: #8b94a3;
+  --tl-accent: #2f6fed;
+  --tl-accent-soft: rgb(47 111 237 / 0.14);
+  --tl-warn: #b45309;
+  color-scheme: light;
+}
+
+.dark {
+  --tl-surface: #191d24;
+  --tl-elevated: #212733;
+  --tl-line: #2b323d;
+  --tl-line-strong: #3a4351;
+  --tl-ink: #e8ecf2;
+  --tl-ink-muted: #9aa6b6;
+  --tl-ink-faint: #6e7a8a;
+  --tl-accent: #5b93ff;
+  --tl-accent-soft: rgb(91 147 255 / 0.18);
+  --tl-warn: #fbbf24;
+  color-scheme: dark;
+}
+
+* {
+  border-color: var(--tl-line);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  /* The window itself is transparent: the shadow and the rounded corners are
+     drawn by the card, and anything outside it must show the desktop. */
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  color: var(--tl-ink);
+  font-family:
+    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+input {
+  user-select: text;
+}
+
+/* The shadow margin. Kept in one place so the card geometry stays obvious. */
+.tl-frame {
+  height: 100%;
+  box-sizing: border-box;
+  padding: var(--tl-shadow);
+}
+
+.tl-card {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--tl-line-strong);
+  border-radius: 12px;
+  background: var(--tl-surface);
+  box-shadow:
+    0 18px 40px rgb(0 0 0 / 0.42),
+    0 2px 8px rgb(0 0 0 / 0.3);
+  animation: tl-in 130ms ease-out;
+}
+
+@keyframes tl-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.tl-row {
+  height: var(--tl-row);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--tl-line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--tl-ink-faint);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--tl-accent);
+  outline-offset: 1px;
+}

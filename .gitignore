@@ -1,0 +1,20 @@
+# Node / Vite
+node_modules/
+dist/
+*.local
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Local settings and logs: the settings file is per-machine.
+config/
+logs/
+*.log
+dist-app/
+TrayList.exe
+
+# Editor
+.vscode/
+.idea/
+Cursor

@@ -1,0 +1,60 @@
+[package]
+name = "trailist"
+version = "0.2.0"
+description = "Shows the hidden Windows tray icons as a scrollable list with names instead of an icon grid"
+authors = ["TrayList"]
+edition = "2021"
+rust-version = "1.82"
+
+[lib]
+name = "trailist_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "trailist"
+path = "src/main.rs"
+
+[[bin]]
+name = "trailist-probe"
+path = "src/bin/probe.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+# Used by build.rs only, to stamp the build with the compiler host's local time.
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_SystemInformation",
+] }
+
+[dependencies]
+tauri = { version = "2.11", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2.3"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+parking_lot = "0.12"
+base64 = "0.22"
+png = "0.18"
+winreg = "0.56"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_Xps",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Shell",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+] }
+uiautomation = "0.25"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

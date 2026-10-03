@@ -1,0 +1,8 @@
+# Windows-only project. Git stores LF and checks out CRLF, so the working copy
+# looks the same on every machine that clones this.
+* text=auto eol=crlf
+
+# Binaries Git must not touch.
+*.png binary
+*.ico binary
+*.exe binary
