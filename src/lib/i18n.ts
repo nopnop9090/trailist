@@ -49,6 +49,8 @@ const DE: Record<string, string> = {
   "list.none": "Keine Symbole gelesen.",
   "list.noneHint":
     "Öffne den Tray über den Pfeil – TrayList liest die Symbole mit, sobald sie sichtbar sind.",
+  "list.fallback":
+    "Direkte Weiterleitung ist nicht verbunden. Ein Klick hier ist nur ein Versuch und kann das falsche Symbol treffen.",
   "list.noMatch": "Nichts gefunden.",
   "list.noMatchHint": "„{query}“ passt zu keinem der {total} Symbole.",
   "keys.move": "Mit den Pfeiltasten bewegen",
@@ -105,6 +107,8 @@ const EN: Record<string, string> = {
   "list.none": "No icons were read.",
   "list.noneHint":
     "Open the tray with the chevron – TrayList reads the icons along as soon as they are visible.",
+  "list.fallback":
+    "Direct forwarding is not connected. A click here is only a best effort and can hit the wrong icon.",
   "list.noMatch": "Nothing found.",
   "list.noMatchHint": "“{query}” matches none of the {total} icons.",
   "keys.move": "Move with the arrow keys",

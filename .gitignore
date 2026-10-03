@@ -5,6 +5,7 @@ dist/
 
 # Rust / Tauri
 src-tauri/target/
+src-tauri/host/target/
 src-tauri/gen/
 
 # Local settings and logs: the settings file is per-machine.
@@ -13,6 +14,7 @@ logs/
 *.log
 dist-app/
 TrayList.exe
+trailist_host.dll
 
 # Editor
 .vscode/

@@ -29,6 +29,10 @@ pub struct TrayItem {
     pub registry_key: Option<String>,
     /// Whether the icon is currently in the visible part of the tray.
     pub promoted: bool,
+    /// The host's registration key, when the list came from the in-explorer mirror.
+    /// A click names this instead of a pixel in the stock flyout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_key: Option<String>,
 }
 
 impl TrayItem {
@@ -232,6 +236,9 @@ pub struct TrayList {
     /// one: doing that after a sort-order change would wipe a filter the user is
     /// still typing and pull the focus out of the settings dialog.
     pub opening: bool,
+    /// Whether the list came from the in-explorer host. When this is false the
+    /// panel is the UI Automation fallback, and a click is only a best effort.
+    pub direct: bool,
 }
 
 /// User-tunable knobs, stored next to the executable so the whole thing stays

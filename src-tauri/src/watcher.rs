@@ -14,7 +14,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::overlay;
 use crate::state::{AppState, Request, Shared};
 use crate::types::{Fault, Prefs, SortMode, TrayItem, TrayList};
-use crate::win::{capture, forward, island, registry, uia};
+use crate::win::host::Session;
+use crate::win::{capture, forward, glyph, host, island, registry, theme, uia};
 
 /// How often the flyout is looked for. Well below the point where a click feels
 /// unanswered, and the check is a couple of `EnumWindows` calls.
@@ -98,6 +99,19 @@ fn run(app: AppHandle, shared: Arc<Shared>, receiver: Receiver<Request>) {
     let mut phase = Phase::Idle;
     let mut blackout_until = start;
     let mut cooldown_until = start;
+    let mut host = Session::attach();
+    let mut host_retry = start;
+    // A click holds the row rectangle for the app's own GetRect. Releasing it
+    // the moment the panel hides would put the menu back on the stock icon.
+    let mut gesture_until = start;
+    // A right-click leaves the list up. The opening click is still down when the
+    // request arrives, so an outside click only counts after the button comes up.
+    let mut away_armed = false;
+    if host.is_some() {
+        eprintln!("TrayList: host attached");
+    } else {
+        eprintln!("TrayList: host not attached, the flyout path stays in use");
+    }
 
     // Get the webview painted before the first real opening needs it.
     overlay::warm_up(&app);
@@ -112,11 +126,63 @@ fn run(app: AppHandle, shared: Arc<Shared>, receiver: Receiver<Request>) {
                 &mut phase,
                 &mut blackout_until,
                 &mut cooldown_until,
+                &mut host,
+                &mut gesture_until,
             );
         }
 
         let now = Instant::now();
-        if now >= blackout_until {
+        if host.as_ref().is_some_and(|session| !session.same_explorer()) {
+            host = None;
+        }
+        if host.is_none() && now.duration_since(host_retry) >= Duration::from_secs(2) {
+            host = Session::attach();
+            host_retry = now;
+        }
+
+        let mut host_owns_corner = false;
+        let mut host_dropped = false;
+        if let Some(session) = host.as_mut() {
+            if let Some(pulse) = session.pulse() {
+                if pulse.bound && !pulse.broken {
+                    host_owns_corner = true;
+                    if shared.visible() && pulse.revision != session.revision() {
+                        if session.refresh().is_some() {
+                            publish_host(&app, &shared, reader.as_ref(), session, false);
+                        }
+                    }
+                    if pulse.open_requested {
+                        if shared.visible() {
+                            overlay::hide(&app);
+                            shared.set_visible(false);
+                            session.release();
+                            phase = Phase::Idle;
+                            cooldown_until = now + COOLDOWN;
+                        } else if now >= cooldown_until {
+                            let _ = session.refresh();
+                            publish_host(&app, &shared, reader.as_ref(), session, true);
+                            phase = Phase::Open {
+                                island_window: 0,
+                                rect: shared.flyout().unwrap_or(island::Rect {
+                                    left: 0,
+                                    top: 0,
+                                    right: 1,
+                                    bottom: 1,
+                                }),
+                            };
+                        }
+                    }
+                }
+            } else {
+                host_dropped = true;
+            }
+        }
+        if host_dropped {
+            host = None;
+            host_retry = now;
+        }
+
+        if !host_owns_corner && now >= blackout_until {
             let open_island = island::visible().into_iter().map(island::raw).next();
             phase = tick(
                 &app,
@@ -128,6 +194,29 @@ fn run(app: AppHandle, shared: Arc<Shared>, receiver: Receiver<Request>) {
                 &mut blackout_until,
                 &mut cooldown_until,
             );
+        }
+
+        if shared.menu_hold() {
+            if !mouse_buttons_down() {
+                away_armed = true;
+            } else if away_armed && panel_hwnd(&app).is_some_and(pointer_is_away) {
+                overlay::hide(&app);
+                shared.set_visible(false);
+                phase = Phase::Idle;
+                cooldown_until = now + COOLDOWN;
+                away_armed = false;
+            }
+        } else {
+            away_armed = false;
+        }
+
+        if !shared.visible() && now >= gesture_until {
+            if let Some(session) = host.as_mut() {
+                if session.bound {
+                    session.release();
+                }
+            }
+            gesture_until = now + Duration::from_secs(60);
         }
 
         std::thread::sleep(TICK);
@@ -144,6 +233,8 @@ fn handle_request(
     phase: &mut Phase,
     blackout_until: &mut Instant,
     cooldown_until: &mut Instant,
+    host: &mut Option<Session>,
+    gesture_until: &mut Instant,
 ) {
     let now = Instant::now();
     match request {
@@ -151,9 +242,29 @@ fn handle_request(
             if shared.visible() {
                 overlay::hide(app);
                 shared.set_visible(false);
+                if let Some(session) = host.as_mut() {
+                    session.release();
+                }
                 *phase = Phase::Idle;
                 *cooldown_until = now + COOLDOWN;
                 return;
+            }
+
+            if let Some(session) = host.as_mut() {
+                let _ = session.refresh();
+                if session.bound {
+                    publish_host(app, shared, reader, session, true);
+                    *phase = Phase::Open {
+                        island_window: 0,
+                        rect: shared.flyout().unwrap_or(island::Rect {
+                            left: 0,
+                            top: 0,
+                            right: 1,
+                            bottom: 1,
+                        }),
+                    };
+                    return;
+                }
             }
 
             // Already open: let the normal detection path handle it.
@@ -180,7 +291,84 @@ fn handle_request(
             }
         }
 
-        Request::Click { x, y, right } => {
+        Request::Hover {
+            index,
+            enter,
+            anchor,
+        } => {
+            let Some(session) = host.as_mut() else {
+                return;
+            };
+            if !session.bound {
+                return;
+            }
+            let Some(key) = shared.item_at(index).and_then(|item| item.host_key) else {
+                return;
+            };
+            let legacy = (!session.unknown_is_classic && enter).then(|| {
+                session.icons.iter().find(|icon| icon.key == key && !icon.version_known).cloned()
+            });
+            if session.hover(&key, enter, anchor) && enter {
+                *gesture_until = Instant::now() + Duration::from_secs(3);
+            }
+            if let Some(Some(icon)) = legacy {
+                icon.post_legacy_move();
+            }
+        }
+
+        Request::Click {
+            index,
+            right,
+            anchor,
+        } => {
+            if let Some(session) = host.as_mut() {
+                if session.bound {
+                    if let Some(key) = shared.item_at(index).and_then(|item| item.host_key) {
+                        let icon = session.icons.iter().find(|icon| icon.key == key).cloned();
+                        // Grant while this process is still foreground. Hiding the
+                        // panel gives the foreground away, and the menu needs the
+                        // grant to already be in place.
+                        if let Some(icon) = icon.as_ref() {
+                            host::grant_foreground(icon.hwnd);
+                        }
+                        // A left click leaves for the app. A right click keeps
+                        // the list, so the next row can be opened without the
+                        // chevron. The app's menu takes the foreground; blur
+                        // must not treat that as clicking away.
+                        if right {
+                            shared.set_menu_hold(true);
+                        } else {
+                            overlay::hide(app);
+                            shared.set_visible(false);
+                            std::thread::sleep(PANEL_GOES_AWAY);
+                        }
+                        let supplement = icon.as_ref().is_some_and(|icon| {
+                            !session.unknown_is_classic && !icon.version_known
+                        });
+                        if session.activate(&key, right, anchor) {
+                            *gesture_until = Instant::now() + Duration::from_secs(3);
+                        }
+                        // After the gesture is held, so GetRect during the
+                        // handler names this row. The host's own message is the
+                        // version-4 one these windows ignore.
+                        if supplement {
+                            if let Some(icon) = icon.as_ref() {
+                                icon.post_legacy(right);
+                            }
+                        }
+                        if !right {
+                            *phase = Phase::Idle;
+                            *cooldown_until = Instant::now() + COOLDOWN;
+                        }
+                        return;
+                    }
+                }
+            }
+
+            let Some(item) = shared.item_at(index) else {
+                return;
+            };
+            let (x, y) = (item.x, item.y);
             if let Phase::Open {
                 island_window,
                 rect,
@@ -348,7 +536,7 @@ fn tick(
             let count = items.len();
 
             shared.set_items(items.clone(), island_window, onscreen);
-            publish(app, items, None);
+            publish(app, items, None, false, true);
             overlay::show(app, onscreen, count, &prefs);
             shared.set_visible(true);
             crate::trace!(
@@ -507,6 +695,7 @@ fn collect(
                     .as_ref()
                     .map(|entry| entry.promoted)
                     .unwrap_or(false),
+                host_key: None,
             }
         })
         .collect();
@@ -538,14 +727,264 @@ pub fn apply_order(items: &mut [TrayItem], prefs: &Prefs) {
     }
 }
 
-fn publish(app: &AppHandle, items: Vec<TrayItem>, error: Option<Fault>) {
+fn publish_host(
+    app: &AppHandle,
+    shared: &Arc<Shared>,
+    reader: Option<&uia::Reader>,
+    session: &Session,
+    opening: bool,
+) {
+    let prefs = app.state::<AppState>().prefs();
+    let items = items_from_host(&session.icons, &prefs);
+    let anchor = if opening {
+        panel_anchor(reader)
+    } else {
+        shared.flyout().unwrap_or_else(|| panel_anchor(reader))
+    };
+    let previous = shared.items().len();
+    let count = items.len();
+    shared.set_items(items.clone(), 0, anchor);
+    publish(app, items, None, true, opening);
+    if opening {
+        overlay::show(app, anchor, count, &prefs);
+        shared.set_visible(true);
+    } else if count != previous {
+        overlay::relayout(app, anchor, count, &prefs);
+    }
+}
+
+fn mouse_buttons_down() -> bool {
+    unsafe {
+        windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01) < 0
+            || windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02) < 0
+    }
+}
+
+fn panel_hwnd(app: &AppHandle) -> Option<windows::Win32::Foundation::HWND> {
+    let raw = overlay::window(app)?.hwnd().ok()?;
+    Some(windows::Win32::Foundation::HWND(raw.0))
+}
+
+/// The pointer is on neither the list, its context menu, nor the taskbar.
+fn pointer_is_away(panel: windows::Win32::Foundation::HWND) -> bool {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetAncestor, GetCursorPos, WindowFromPoint, GA_ROOT,
+    };
+    let mut point = POINT::default();
+    if unsafe { GetCursorPos(&mut point) }.is_err() {
+        return false;
+    }
+    let hit = unsafe { WindowFromPoint(point) };
+    if hit.0.is_null() {
+        return true;
+    }
+    let root = unsafe { GetAncestor(hit, GA_ROOT) };
+    if hit.0 == panel.0 || root.0 == panel.0 {
+        return false;
+    }
+    let class = window_class(hit);
+    let root_class = window_class(root);
+    if class == "#32768" || root_class == "#32768" {
+        return false;
+    }
+    if island::is_shell_surface(hit) || island::is_shell_surface(root) {
+        return false;
+    }
+    true
+}
+
+fn window_class(hwnd: windows::Win32::Foundation::HWND) -> String {
+    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+    let mut buffer = [0u16; 64];
+    let length = unsafe { GetClassNameW(hwnd, &mut buffer) };
+    if length <= 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buffer[..length as usize])
+}
+
+/// Overflow icons from the host mirror. Promoted ones stay in the list as well,
+/// marked, so the pin can be switched off from here.
+fn items_from_host(icons: &[host::HostIcon], prefs: &Prefs) -> Vec<TrayItem> {
+    let entries = registry::entries();
+    let dark = theme::is_dark();
+    let mut exe_of: std::collections::HashMap<isize, String> = std::collections::HashMap::new();
+    let icons = listed_icons(icons, &mut exe_of);
+    let mut items: Vec<TrayItem> = icons
+        .into_iter()
+        .filter_map(|icon| {
+            let mut matched = registry::match_icon(&entries, &icon.key, &icon.tip);
+            if !exe_of.contains_key(&icon.hwnd) {
+                exe_of.insert(icon.hwnd, host::owner_exe(icon.hwnd).unwrap_or_default());
+            }
+            let exe = exe_of.get(&icon.hwnd).cloned().unwrap_or_default();
+            if matched.is_none() && icon.tip.trim().is_empty() && !exe.is_empty() {
+                matched = registry::match_executable(&entries, &exe);
+            }
+            // Promoted icons sit on the taskbar and stay in this list, so the
+            // pin that put them there can be turned off again.
+            let promoted = matched.as_ref().map(|entry| entry.promoted).unwrap_or(false);
+            // An empty szTip is not "no name". The shell keeps InitialTooltip,
+            // and otherwise the executable's own description ("NVIDIA Broadcast").
+            let tip = if icon.tip.trim().is_empty() {
+                matched
+                    .as_ref()
+                    .and_then(|entry| entry.tooltip.clone())
+                    .filter(|stored| !stored.trim().is_empty())
+                    .or_else(|| host::program_name(&exe))
+                    .unwrap_or_default()
+            } else {
+                icon.tip.clone()
+            };
+            let (title, detail) = TrayItem::compose(&tip);
+            let icon_url = if !icon.icon.is_empty() {
+                icon.icon.clone()
+            } else {
+                matched
+                    .as_ref()
+                    .and_then(|entry| entry.snapshot.as_deref())
+                    .filter(|png| !png.is_empty())
+                    .map(capture::png_bytes_data_url)
+                    .unwrap_or_default()
+            };
+            let icon_url = glyph::for_shell(&icon_url, dark);
+            Some(TrayItem {
+                index: 0,
+                tooltip: tip,
+                title,
+                detail,
+                icon: icon_url,
+                icon_background: "transparent".to_string(),
+                x: 0,
+                y: 0,
+                registry_key: matched.as_ref().map(|entry| entry.key.clone()),
+                promoted,
+                host_key: Some(icon.key.clone()),
+            })
+        })
+        .collect();
+    apply_order(&mut items, prefs);
+    items
+}
+
+/// Live overflow rows. A killed process often never sends `NIM_DELETE`, and a
+/// modify without a GUID can sit beside the GUID row for the same icon.
+fn listed_icons<'a>(
+    icons: &'a [host::HostIcon],
+    exe_of: &mut std::collections::HashMap<isize, String>,
+) -> Vec<&'a host::HostIcon> {
+    let mut ranked: Vec<&host::HostIcon> = Vec::new();
+    let mut slot_of: std::collections::HashMap<(isize, u32), usize> = std::collections::HashMap::new();
+    for icon in icons {
+        if icon.hidden || !icon.window_alive() {
+            continue;
+        }
+        let slot = (icon.hwnd, icon.id);
+        if let Some(&index) = slot_of.get(&slot) {
+            if richer(icon, ranked[index]) {
+                ranked[index] = icon;
+            }
+        } else {
+            slot_of.insert(slot, ranked.len());
+            ranked.push(icon);
+        }
+    }
+
+    let mut newest: std::collections::HashMap<(String, String), isize> = std::collections::HashMap::new();
+    for icon in &ranked {
+        let tip = icon.tip.trim();
+        if tip.is_empty() {
+            continue;
+        }
+        let exe = exe_of
+            .entry(icon.hwnd)
+            .or_insert_with(|| host::owner_exe(icon.hwnd).unwrap_or_default())
+            .to_ascii_lowercase();
+        if exe.is_empty() {
+            continue;
+        }
+        newest
+            .entry((exe, tip.to_ascii_lowercase()))
+            .and_modify(|hwnd| {
+                if icon.hwnd > *hwnd {
+                    *hwnd = icon.hwnd;
+                }
+            })
+            .or_insert(icon.hwnd);
+    }
+
+    ranked
+        .into_iter()
+        .filter(|icon| {
+            let tip = icon.tip.trim();
+            if tip.is_empty() {
+                return true;
+            }
+            let Some(exe) = exe_of.get(&icon.hwnd) else {
+                return true;
+            };
+            if exe.is_empty() {
+                return true;
+            }
+            newest.get(&(exe.to_ascii_lowercase(), tip.to_ascii_lowercase())) == Some(&icon.hwnd)
+        })
+        .collect()
+}
+
+fn richer(candidate: &host::HostIcon, current: &host::HostIcon) -> bool {
+    let score = |icon: &host::HostIcon| {
+        (
+            !icon.tip.trim().is_empty() as u8,
+            icon.key.starts_with("guid:") as u8,
+            (icon.callback != 0) as u8,
+        )
+    };
+    score(candidate) > score(current)
+}
+
+/// A one-pixel-tall anchor centred on the chevron, sitting on the taskbar top.
+/// The panel is placed from that the same way it used to be placed from the flyout.
+fn panel_anchor(reader: Option<&uia::Reader>) -> island::Rect {
+    let Some(taskbar) = island::find_by_class(island::TASKBAR_CLASS) else {
+        return island::Rect {
+            left: 0,
+            top: 0,
+            right: 1,
+            bottom: 1,
+        };
+    };
+    let taskbar_rect = island::rect(taskbar).unwrap_or(island::Rect {
+        left: 0,
+        top: 0,
+        right: 1,
+        bottom: 1,
+    });
+    let centre = reader
+        .and_then(|reader| reader.chevron(island::raw(taskbar)).ok().flatten())
+        .and_then(|chevron| chevron.get_bounding_rectangle().ok())
+        .map(|bounds| (bounds.get_left() + bounds.get_right()) / 2)
+        .unwrap_or(taskbar_rect.right - 48);
+    island::Rect {
+        left: centre,
+        right: centre + 1,
+        top: taskbar_rect.top - 1,
+        bottom: taskbar_rect.top,
+    }
+}
+
+fn publish(app: &AppHandle, items: Vec<TrayItem>, error: Option<Fault>, direct: bool, opening: bool) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.shared.set_direct(direct);
+    }
     let payload = TrayList {
         items,
         error,
         source: shell_build(),
-        // A published list always comes from a read, which is what makes the
-        // panel treat the moment as an opening.
-        opening: true,
+        // A published list from a read is an opening. A host update of an
+        // already open panel is not, so the filter the user is typing stays.
+        opening,
+        direct,
     };
     let _ = app.emit(EVENT_LIST, payload);
     // The panel is about to open, which is the only moment its colour scheme
@@ -556,7 +995,7 @@ fn publish(app: &AppHandle, items: Vec<TrayItem>, error: Option<Fault>) {
 
 fn publish_error(app: &AppHandle, fault: Fault) {
     eprintln!("TrayList: {fault}");
-    publish(app, Vec::new(), Some(fault));
+    publish(app, Vec::new(), Some(fault), false, true);
 }
 
 /// The shell build the list was read from. Cheap to cache, and genuinely useful
