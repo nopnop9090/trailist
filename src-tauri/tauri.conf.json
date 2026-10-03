@@ -42,10 +42,13 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "resources": [],
+    "resources": {
+      "host/target/release/trailist_host.dll": "trailist_host.dll"
+    },
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh"
       }
     }
   }

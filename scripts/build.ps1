@@ -65,6 +65,14 @@ $remap = @(
 $env:RUSTFLAGS = (@($env:RUSTFLAGS, $remap) | Where-Object { $_ }) -join " "
 Write-Host "==> Pfade im Binary neutralisieren" -ForegroundColor Cyan
 
+Write-Host "==> Host-DLL bauen" -ForegroundColor Cyan
+Push-Location "$Root\src-tauri\host"
+cargo build --release
+if ($LASTEXITCODE -ne 0) { Write-Error "Host-DLL-Build fehlgeschlagen."; exit 1 }
+Pop-Location
+$hostDll = "$Root\src-tauri\host\target\release\trailist_host.dll"
+if (-not (Test-Path $hostDll)) { Write-Error "Keine Host-DLL unter $hostDll."; exit 1 }
+
 $targets = if ($SkipInstaller) { @("--no-bundle") } else { @("--bundles", "nsis") }
 
 Write-Host "==> Release bauen (der erste Lauf dauert mehrere Minuten)" -ForegroundColor Cyan
@@ -80,12 +88,15 @@ if (-not (Test-Path $exe)) { Write-Error "Keine exe in $releaseDir gefunden."; e
 $dist = Join-Path $Root "dist-app"
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 Copy-Item $exe (Join-Path $dist "TrayList.exe") -Force
+Copy-Item $hostDll (Join-Path $dist "trailist_host.dll") -Force
 # Auch neben config/ legen, damit das Repo-Root direkt startbar ist.
 Copy-Item $exe (Join-Path $Root "TrayList.exe") -Force
+Copy-Item $hostDll (Join-Path $Root "trailist_host.dll") -Force
 
 Write-Host ""
 Write-Host "Exe:       $(Join-Path $Root 'TrayList.exe')" -ForegroundColor Green
 Write-Host "           $([math]::Round((Get-Item $exe).Length / 1MB, 1)) MB"
+Write-Host "Host-DLL:  $(Join-Path $dist 'trailist_host.dll')" -ForegroundColor Green
 
 if (-not $SkipInstaller) {
   $installer = Get-ChildItem "$releaseDir\bundle\nsis\*.exe" -ErrorAction SilentlyContinue |
@@ -100,5 +111,6 @@ if ($Portable) {
   $portableDir = Join-Path $dist "portable"
   New-Item -ItemType Directory -Path (Join-Path $portableDir "config") -Force | Out-Null
   Copy-Item (Join-Path $dist "TrayList.exe") $portableDir -Force
+  Copy-Item $hostDll (Join-Path $portableDir "trailist_host.dll") -Force
   Write-Host "Portable:  $portableDir" -ForegroundColor Green
 }

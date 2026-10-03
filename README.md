@@ -15,6 +15,7 @@ state on the right, and a filter box for when there are forty of them.
   ▸ the Windows grid stays hidden
   ▸ the list opens from the registrations Explorer already holds
   ▸ click or hover a row -> that app gets the same message the shell would send
+  ▸ a right-click leaves the list up until you click away
   ▸ Esc / click away / the chevron again -> the list goes away
 ```
 
@@ -53,7 +54,8 @@ just are not shown anywhere at once. That is the whole problem this solves.
 - Filter box, auto-focused: type a few letters, the list narrows as you type
 - Sorting: the shell's own order, or alphabetical
 - Keyboard: `↑`/`↓` to move, `Enter` to open, `Esc` to close
-- Right-click a row for the icon's own context menu
+- Right-click a row for the icon's own context menu. The list stays open until
+  you click away, so a second right-click does not mean opening the panel again
 - Panel sized to the content, centred on the chevron that was clicked and resting
   on the taskbar, always inside the work area of the right monitor
 - Follows the shell's colour scheme: the palette is chosen from
@@ -70,9 +72,17 @@ just are not shown anywhere at once. That is the whole problem this solves.
   all follow it; anything that is not German gets English rather than a mixture
 
 **Tray attributes**
-- Optional pin button per row: turns an icon on or off in the *visible* part of
-  the tray by writing the shell's own `IsPromoted` flag
+- Pin button per row, including icons that are already in the visible strip, so
+  the pin that put them there can be turned off again. It writes the shell's own
+  `IsPromoted` flag
 - Icons that are currently visible in the tray are marked as such
+- An empty tooltip uses the shell's `InitialTooltip`, and when that is empty too
+  the executable's own description, so a row is not left nameless
+- Flat shell glyphs such as Safely Remove Hardware are drawn in the flyout's text
+  colour: black on a light tray, white on a dark one. A colourful icon is left as
+  it was registered
+- Icons that redraw themselves constantly, such as Process Lasso, stay visible.
+  The host copies the glyph only after Explorer has taken its own copy
 
 **Getting to it**
 - The normal chevron click, or
@@ -100,7 +110,23 @@ Release build (exe plus NSIS installer):
 ```
 
 The portable exe lands in `dist-app/portable/` and, when the script has run,
-also as `TrayList.exe` in the repo root next to `config/`.
+also as `TrayList.exe` in the repo root next to `config/`. `trailist_host.dll`
+is copied beside each of those. Without that DLL the panel falls back to UI
+Automation.
+
+## Installing
+
+The NSIS installer is per-user and needs no administrator. It recognises a copy
+that is already installed:
+
+- **0.3 and older** have no host DLL. The running app is closed and the files are
+  replaced. Explorer stays up.
+- **0.4 and newer** load `trailist_host.dll` into Explorer. The taskbar restarts
+  once so that file can be replaced; Windows brings the shell back by itself.
+  Uninstalling one of those versions does the same, otherwise the DLL stays
+  mapped and the file cannot be deleted.
+
+A portable copy is `TrayList.exe` with `trailist_host.dll` in the same folder.
 
 ## Testing without the UI
 
@@ -177,31 +203,41 @@ message, so a right-click is `WM_RBUTTONUP`. Version 4, only after
 of `lParam`. Sending the version-4 form to a version-0 window does nothing.
 
 The name is the live tooltip. When that string is empty, the row uses
-`InitialTooltip` from `HKCU\Control Panel\NotifyIconSettings`. A registration
-whose window has already gone is dropped; Explorer does the same when a process
-is killed without `NIM_DELETE`, and the mirror used to keep those rows.
+`InitialTooltip` from `HKCU\Control Panel\NotifyIconSettings`, and when that is
+empty too, the executable's file description. A registration whose window has
+already gone is dropped. Explorer does the same when a process is killed
+without `NIM_DELETE`.
+
+The glyph is read only after Explorer has stored its own copy. Reading the
+caller's bitmap first is what used to blank icons that replace themselves on
+every update. A 32-bit icon that leaves the alpha byte at zero takes its shape
+from the mask. A glyph that is only one flat colour is then tinted to the shell
+text colour, which is why Safely Remove Hardware matches the flyout instead of
+staying the white form the taskbar registered.
 
 The previous path is still in the tree. UI Automation reads
 `TopLevelWindowForOverflowXamlIsland` and `forward.rs` replays a click with
 `SendInput`. The panel labels that list as a best effort. The Windows 10
 `ToolbarWindow32` route is not implemented.
 
-## Known trade-offs
+## Known limits
 
-- **With the host attached, the stock overflow does not stay on screen.** The
-  chevron opens this list. Hover on a row is posted to that app, and a click names
-  the registration (`GUID` or window and id) instead of a pixel in the flyout.
-- **If the host cannot attach, the old flyout path is the fallback.** That list is
-  labelled as a best effort: the grid can flash, a click briefly shows the flyout,
-  and hover is not delivered. A click there is allowed to miss.
-- **Icons come from the live registration when the host has copied one.** A row
-  whose icon has not arrived yet still uses the PNG snapshot under
+- **The chevron opens this list.** Hover and clicks go to the registration
+  (`GUID`, or window and id), not to a pixel in the stock grid. The grid itself
+  stays hidden while the host is attached.
+- **The UI Automation path is only the fallback**, used when the DLL could not
+  attach. The panel labels that list. It is the old behaviour: the grid can
+  flash, and hover is not delivered.
+- **A row whose live glyph has not arrived yet** still uses the PNG snapshot under
   `HKCU\Control Panel\NotifyIconSettings`.
 - **The tooltip is the name.** Applications decide what goes in it, so a few rows
-  read as a status rather than a name. An empty tooltip falls back to the shell's
-  `InitialTooltip`. Where an application writes its own name twice —
-  `TrayMaster TrayMaster - 3/3 running` — the repeat is removed, because only the
-  repeat is wrong there.
+  read as a status rather than a name. An empty tooltip falls back to
+  `InitialTooltip`, then to the executable's description. Where an application
+  writes its own name twice — `TrayMaster TrayMaster - 3/3 running` — the repeat
+  is removed, because only the repeat is wrong there.
+- **Upgrading 0.4 or newer restarts Explorer once.** The host DLL is mapped in
+  that process, and the file cannot be replaced until the process is gone. The
+  taskbar blinks and comes back. An upgrade from 0.3 does not need that.
 - **No foreground, no keyboard.** The panel appears because you clicked the
   *taskbar*, so Windows may refuse to hand us the foreground. TrayList insists
   twice; if that ever fails, the list still works with the mouse.
@@ -234,12 +270,14 @@ src-tauri/src/
   win/island.rs          the overflow flyout window
   win/capture.rs         icon bitmaps
   win/registry.rs        NotifyIconSettings, IsPromoted
+  win/glyph.rs           tints a flat shell glyph to the flyout's text colour
   win/theme.rs           which colour scheme the shell is drawing in
   win/autostart.rs       the per-user Run entry
   win/launch.rs          opening a link in the browser
   win/focus.rs           taking the foreground
   bin/probe.rs           console front end for testing
 src-tauri/host/          the DLL Explorer loads; it mirrors Shell_NotifyIcon
+src-tauri/windows/       NSIS hooks: replace 0.3 in place, restart Explorer from 0.4 on
 src-tauri/build.rs       stamps the build with the compiler host's local time
 public/badges/           the not-by-humans badge, one per panel theme
 scripts/build.ps1        release build
@@ -255,19 +293,20 @@ docs/screenshot-*.png    the pictures above, one pair per language
 cargo test --manifest-path .\src-tauri\Cargo.toml
 ```
 
-Three tests in the app crate. The first is on the piece with real guesswork in
-it: turning the tooltips this machine's tray actually produces into a name and a
-state. Every case in it came off a real tray, including the awkward ones — the
-name repeated on one line, the name repeated across two, a name that merely
-shares a word, and a tooltip that is nothing but the name twice.
-
-Two more cover the language setting: that the setting wins over the system's
-language, and that every language has a complete tray menu. The frontend's own
-strings are checked by the compiler rather than by a test — the tables are one
-object each, so `tsc` is what catches a key that no longer exists.
+The app crate tests the piece with real guesswork in it: turning the tooltips
+this machine's tray actually produces into a name and a state. Every case in it
+came off a real tray, including the awkward ones — the name repeated on one
+line, the name repeated across two, a name that merely shares a word, and a
+tooltip that is nothing but the name twice. Further tests cover the language
+setting (the setting wins over the system's language, and every language has a
+complete tray menu) and that a flat white glyph is recoloured for a light shell.
+The frontend's own strings are checked by the compiler rather than by a test —
+the tables are one object each, so `tsc` is what catches a key that no longer
+exists.
 
 The host crate checks the 32-bit `NOTIFYICONDATA` layout this build actually
-sends, including a `Shell_NotifyIconGetRect` request. Run it with
+sends, including a `Shell_NotifyIconGetRect` request, and that an icon with no
+alpha takes its shape from the mask. Run it with
 `cargo test --manifest-path .\src-tauri\host\Cargo.toml`.
 
 ## Credit

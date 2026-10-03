@@ -14,6 +14,7 @@ logs/
 *.log
 dist-app/
 TrayList.exe
+trailist_host.dll
 
 # Editor
 .vscode/
