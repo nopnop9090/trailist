@@ -52,6 +52,19 @@ Write-Host "==> Frontend bauen" -ForegroundColor Cyan
 npm run build
 if ($LASTEXITCODE -ne 0) { Write-Error "Frontend-Build fehlgeschlagen."; exit 1 }
 
+# Was im Binary an Pfaden steht, trägt den Benutzernamen und den Klonpfad des
+# Builders: rustc schreibt zu jeder Panic-Stelle die Quelldatei mit, und bei
+# Dependencies ist das ein absoluter Pfad unter dem Benutzerprofil. Umbiegen hält
+# eine veröffentlichte Exe frei von dem Rechner, auf dem sie gebaut wurde.
+# Die Präfixe kommen aus der Umgebung, damit hier kein Rechnername im Skript steht.
+$remap = @(
+  "--remap-path-prefix=$env:USERPROFILE\.cargo=/cargo",
+  "--remap-path-prefix=$env:USERPROFILE=/builder",
+  "--remap-path-prefix=$Root=/trailist"
+) -join " "
+$env:RUSTFLAGS = (@($env:RUSTFLAGS, $remap) | Where-Object { $_ }) -join " "
+Write-Host "==> Pfade im Binary neutralisieren" -ForegroundColor Cyan
+
 $targets = if ($SkipInstaller) { @("--no-bundle") } else { @("--bundles", "nsis") }
 
 Write-Host "==> Release bauen (der erste Lauf dauert mehrere Minuten)" -ForegroundColor Cyan
