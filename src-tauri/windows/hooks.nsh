@@ -17,8 +17,10 @@
   Sleep 400
 !macroend
 
-; taskkill returns as soon as the signal is sent. Wait until the shell is
-; actually back, and start it if Windows did not.
+; taskkill returns as soon as the signal is sent. Wait until Shell_TrayWnd
+; exists again, and start the shell if Windows did not. FindWindow is used
+; instead of a string search: the uninstall section cannot call ordinary
+; NSIS functions, and this macro runs there too.
 !macro TrayList.RestartExplorer
   DetailPrint "Restarting Explorer so trailist_host.dll can be replaced."
   ExecWait '"$SYSDIR\taskkill.exe" /F /IM explorer.exe' $0
@@ -26,11 +28,8 @@
   ${Do}
     Sleep 400
     IntOp $R6 $R6 + 1
-    nsExec::ExecToStack 'cmd /c tasklist /NH /FI "IMAGENAME eq explorer.exe"'
-    Pop $0
-    Pop $1
-    ${StrLoc} $R7 $1 "explorer.exe" ">"
-    ${If} $R7 != ""
+    System::Call 'user32::FindWindowW(w "Shell_TrayWnd", p 0) p .r0'
+    ${If} $0 <> 0
       ${ExitDo}
     ${EndIf}
     ${If} $R6 >= 20
