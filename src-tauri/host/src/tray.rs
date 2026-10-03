@@ -238,17 +238,26 @@ fn on_copydata(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT 
         log::hex("payload", bytes);
     }
 
-    if data.dwData == parse::COPYDATA_NOTIFY {
+    // Explorer has to copy the icon before we read it. The read uses its own
+    // `CopyIcon`, but a snapshot taken first still raced icons that replace
+    // their bitmap on every update (Process Lasso) and left the flyout blank.
+    let notify = if data.dwData == parse::COPYDATA_NOTIFY {
         match parse::parse(data.dwData, bytes) {
-            Some(op) => accept(op),
+            Some(op) => Some(op),
             None => {
                 log::line("notify copydata did not match the 32-bit signature layout");
                 state::note_broken();
+                None
             }
         }
-    }
+    } else {
+        None
+    };
 
     let result = call_old(TRAY_OLD.load(Ordering::SeqCst), hwnd, msg, wparam, lparam);
+    if let Some(op) = notify {
+        accept(op);
+    }
     if data.dwData == parse::COPYDATA_RECT {
         if let Some(query) = parse::parse_rect(data.dwData, bytes) {
             if let Some(anchor) = state::gesture_anchor(&rect_key(&query)) {

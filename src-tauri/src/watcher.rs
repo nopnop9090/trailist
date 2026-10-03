@@ -15,7 +15,7 @@ use crate::overlay;
 use crate::state::{AppState, Request, Shared};
 use crate::types::{Fault, Prefs, SortMode, TrayItem, TrayList};
 use crate::win::host::Session;
-use crate::win::{capture, forward, host, island, registry, uia};
+use crate::win::{capture, forward, glyph, host, island, registry, theme, uia};
 
 /// How often the flyout is looked for. Well below the point where a click feels
 /// unanswered, and the check is a couple of `EnumWindows` calls.
@@ -808,6 +808,7 @@ fn window_class(hwnd: windows::Win32::Foundation::HWND) -> String {
 /// marked, so the pin can be switched off from here.
 fn items_from_host(icons: &[host::HostIcon], prefs: &Prefs) -> Vec<TrayItem> {
     let entries = registry::entries();
+    let dark = theme::is_dark();
     let mut exe_of: std::collections::HashMap<isize, String> = std::collections::HashMap::new();
     let icons = listed_icons(icons, &mut exe_of);
     let mut items: Vec<TrayItem> = icons
@@ -847,6 +848,7 @@ fn items_from_host(icons: &[host::HostIcon], prefs: &Prefs) -> Vec<TrayItem> {
                     .map(capture::png_bytes_data_url)
                     .unwrap_or_default()
             };
+            let icon_url = glyph::for_shell(&icon_url, dark);
             Some(TrayItem {
                 index: 0,
                 tooltip: tip,
