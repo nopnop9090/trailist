@@ -217,6 +217,11 @@ pub fn set_pinned(
     if let Some(target) = items.iter_mut().find(|candidate| candidate.index == index) {
         target.promoted = pinned;
     }
+    if let Some(flyout) = state.shared.flyout() {
+        state
+            .shared
+            .set_items(items.clone(), state.shared.island().unwrap_or(0), flyout);
+    }
     if state.prefs().pinned_first {
         crate::watcher::apply_order(&mut items, &state.prefs());
     }

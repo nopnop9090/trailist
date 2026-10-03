@@ -162,6 +162,83 @@ pub fn owner_exe(hwnd: isize) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..length as usize]))
 }
 
+/// The name Windows shows for an executable when the tray tooltip is empty.
+///
+/// `FileDescription` is what Explorer uses ("NVIDIA Broadcast"). The file name
+/// is the fallback when the binary has no version resource.
+pub fn program_name(path: &str) -> Option<String> {
+    version_string(path, "FileDescription")
+        .or_else(|| version_string(path, "ProductName"))
+        .or_else(|| {
+            std::path::Path::new(path)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::trim)
+                .filter(|stem| !stem.is_empty())
+                .map(str::to_string)
+        })
+}
+
+fn version_string(path: &str, key: &str) -> Option<String> {
+    use windows::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    };
+    use windows::core::PCWSTR;
+    if path.is_empty() {
+        return None;
+    }
+    let file = wide(path);
+    let size = unsafe { GetFileVersionInfoSizeW(PCWSTR(file.as_ptr()), None) };
+    if size == 0 {
+        return None;
+    }
+    let mut block = vec![0u8; size as usize];
+    unsafe { GetFileVersionInfoW(PCWSTR(file.as_ptr()), None, size, block.as_mut_ptr().cast()) }
+        .ok()?;
+    let (lang, codepage) = file_translation(&block).unwrap_or((0x0409, 0x04B0));
+    let query = format!("\\StringFileInfo\\{lang:04X}{codepage:04X}\\{key}");
+    let query = wide(&query);
+    let mut ptr = std::ptr::null_mut();
+    let mut len = 0u32;
+    let ok = unsafe {
+        VerQueryValueW(
+            block.as_ptr().cast(),
+            PCWSTR(query.as_ptr()),
+            &mut ptr,
+            &mut len,
+        )
+    };
+    if !ok.as_bool() || ptr.is_null() || len == 0 {
+        return None;
+    }
+    let words = unsafe { std::slice::from_raw_parts(ptr as *const u16, len as usize) };
+    let end = words.iter().position(|unit| *unit == 0).unwrap_or(words.len());
+    let text = String::from_utf16_lossy(&words[..end]).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+fn file_translation(block: &[u8]) -> Option<(u16, u16)> {
+    use windows::Win32::Storage::FileSystem::VerQueryValueW;
+    use windows::core::PCWSTR;
+    let query = wide("\\VarFileInfo\\Translation");
+    let mut ptr = std::ptr::null_mut();
+    let mut len = 0u32;
+    let ok = unsafe {
+        VerQueryValueW(
+            block.as_ptr().cast(),
+            PCWSTR(query.as_ptr()),
+            &mut ptr,
+            &mut len,
+        )
+    };
+    if !ok.as_bool() || ptr.is_null() || len < 4 {
+        return None;
+    }
+    let lang = unsafe { *(ptr as *const u16) };
+    let codepage = unsafe { *((ptr as *const u16).add(1)) };
+    Some((lang, codepage))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Reply {

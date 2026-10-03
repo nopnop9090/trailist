@@ -196,7 +196,12 @@ export default function App() {
     try {
       await api.activate(item.index, button, row);
     } catch {
-      setBusy(null);
+      // The click did not land. A right-click leaves the list up either way,
+      // so the mark has to come off here rather than when the list closes.
+    } finally {
+      if (button === "right") {
+        setBusy(null);
+      }
     }
   }, []);
 

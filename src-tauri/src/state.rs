@@ -27,6 +27,9 @@ pub struct Shared {
     visible: AtomicBool,
     /// The open list came from the host, so clicks name a registration.
     direct: AtomicBool,
+    /// A right-click left the list up so another row can be opened. Blur from
+    /// the app's own menu must not count as "clicked away".
+    menu_hold: AtomicBool,
     requests: Mutex<Option<Sender<Request>>>,
 }
 
@@ -56,6 +59,17 @@ impl Shared {
 
     pub fn set_visible(&self, value: bool) {
         self.visible.store(value, Ordering::SeqCst);
+        if !value {
+            self.menu_hold.store(false, Ordering::SeqCst);
+        }
+    }
+
+    pub fn set_menu_hold(&self, value: bool) {
+        self.menu_hold.store(value, Ordering::SeqCst);
+    }
+
+    pub fn menu_hold(&self) -> bool {
+        self.menu_hold.load(Ordering::SeqCst)
     }
 
     pub fn visible(&self) -> bool {

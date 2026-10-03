@@ -92,13 +92,15 @@ pub fn run() {
                 // goes to the taskbar itself, because that is the user reaching
                 // for the chevron and the tray toggle path already handles it.
                 WindowEvent::Focused(false) => {
-                    if !overlay::is_dismissable() {
+                    let app = window.app_handle();
+                    if app.state::<AppState>().shared.menu_hold() {
+                        trace!("overlay: blur ignored, a row menu is using the foreground");
+                    } else if !overlay::is_dismissable() {
                         trace!("overlay: blur ignored, still settling");
                     } else if island::is_shell_surface(focus::foreground()) {
                         trace!("overlay: blur went to the taskbar, letting the chevron decide");
                     } else {
                         trace!("overlay: lost the foreground, dismissing");
-                        let app = window.app_handle();
                         overlay::hide(app);
                         app.state::<AppState>().shared.set_visible(false);
                     }

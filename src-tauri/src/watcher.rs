@@ -104,6 +104,9 @@ fn run(app: AppHandle, shared: Arc<Shared>, receiver: Receiver<Request>) {
     // A click holds the row rectangle for the app's own GetRect. Releasing it
     // the moment the panel hides would put the menu back on the stock icon.
     let mut gesture_until = start;
+    // A right-click leaves the list up. The opening click is still down when the
+    // request arrives, so an outside click only counts after the button comes up.
+    let mut away_armed = false;
     if host.is_some() {
         eprintln!("TrayList: host attached");
     } else {
@@ -191,6 +194,20 @@ fn run(app: AppHandle, shared: Arc<Shared>, receiver: Receiver<Request>) {
                 &mut blackout_until,
                 &mut cooldown_until,
             );
+        }
+
+        if shared.menu_hold() {
+            if !mouse_buttons_down() {
+                away_armed = true;
+            } else if away_armed && panel_hwnd(&app).is_some_and(pointer_is_away) {
+                overlay::hide(&app);
+                shared.set_visible(false);
+                phase = Phase::Idle;
+                cooldown_until = now + COOLDOWN;
+                away_armed = false;
+            }
+        } else {
+            away_armed = false;
         }
 
         if !shared.visible() && now >= gesture_until {
@@ -314,9 +331,17 @@ fn handle_request(
                         if let Some(icon) = icon.as_ref() {
                             host::grant_foreground(icon.hwnd);
                         }
-                        overlay::hide(app);
-                        shared.set_visible(false);
-                        std::thread::sleep(PANEL_GOES_AWAY);
+                        // A left click leaves for the app. A right click keeps
+                        // the list, so the next row can be opened without the
+                        // chevron. The app's menu takes the foreground; blur
+                        // must not treat that as clicking away.
+                        if right {
+                            shared.set_menu_hold(true);
+                        } else {
+                            overlay::hide(app);
+                            shared.set_visible(false);
+                            std::thread::sleep(PANEL_GOES_AWAY);
+                        }
                         let supplement = icon.as_ref().is_some_and(|icon| {
                             !session.unknown_is_classic && !icon.version_known
                         });
@@ -331,8 +356,10 @@ fn handle_request(
                                 icon.post_legacy(right);
                             }
                         }
-                        *phase = Phase::Idle;
-                        *cooldown_until = Instant::now() + COOLDOWN;
+                        if !right {
+                            *phase = Phase::Idle;
+                            *cooldown_until = Instant::now() + COOLDOWN;
+                        }
                         return;
                     }
                 }
@@ -726,7 +753,59 @@ fn publish_host(
     }
 }
 
-/// Overflow icons from the host mirror. Promoted ones stay on the taskbar.
+fn mouse_buttons_down() -> bool {
+    unsafe {
+        windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01) < 0
+            || windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02) < 0
+    }
+}
+
+fn panel_hwnd(app: &AppHandle) -> Option<windows::Win32::Foundation::HWND> {
+    let raw = overlay::window(app)?.hwnd().ok()?;
+    Some(windows::Win32::Foundation::HWND(raw.0))
+}
+
+/// The pointer is on neither the list, its context menu, nor the taskbar.
+fn pointer_is_away(panel: windows::Win32::Foundation::HWND) -> bool {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetAncestor, GetCursorPos, WindowFromPoint, GA_ROOT,
+    };
+    let mut point = POINT::default();
+    if unsafe { GetCursorPos(&mut point) }.is_err() {
+        return false;
+    }
+    let hit = unsafe { WindowFromPoint(point) };
+    if hit.0.is_null() {
+        return true;
+    }
+    let root = unsafe { GetAncestor(hit, GA_ROOT) };
+    if hit.0 == panel.0 || root.0 == panel.0 {
+        return false;
+    }
+    let class = window_class(hit);
+    let root_class = window_class(root);
+    if class == "#32768" || root_class == "#32768" {
+        return false;
+    }
+    if island::is_shell_surface(hit) || island::is_shell_surface(root) {
+        return false;
+    }
+    true
+}
+
+fn window_class(hwnd: windows::Win32::Foundation::HWND) -> String {
+    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+    let mut buffer = [0u16; 64];
+    let length = unsafe { GetClassNameW(hwnd, &mut buffer) };
+    if length <= 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buffer[..length as usize])
+}
+
+/// Overflow icons from the host mirror. Promoted ones stay in the list as well,
+/// marked, so the pin can be switched off from here.
 fn items_from_host(icons: &[host::HostIcon], prefs: &Prefs) -> Vec<TrayItem> {
     let entries = registry::entries();
     let mut exe_of: std::collections::HashMap<isize, String> = std::collections::HashMap::new();
@@ -735,22 +814,24 @@ fn items_from_host(icons: &[host::HostIcon], prefs: &Prefs) -> Vec<TrayItem> {
         .into_iter()
         .filter_map(|icon| {
             let mut matched = registry::match_icon(&entries, &icon.key, &icon.tip);
-            if matched.is_none() && icon.tip.trim().is_empty() {
-                if let Some(exe) = exe_of.get(&icon.hwnd) {
-                    matched = registry::match_executable(&entries, exe);
-                }
+            if !exe_of.contains_key(&icon.hwnd) {
+                exe_of.insert(icon.hwnd, host::owner_exe(icon.hwnd).unwrap_or_default());
             }
+            let exe = exe_of.get(&icon.hwnd).cloned().unwrap_or_default();
+            if matched.is_none() && icon.tip.trim().is_empty() && !exe.is_empty() {
+                matched = registry::match_executable(&entries, &exe);
+            }
+            // Promoted icons sit on the taskbar and stay in this list, so the
+            // pin that put them there can be turned off again.
             let promoted = matched.as_ref().map(|entry| entry.promoted).unwrap_or(false);
-            if promoted {
-                return None;
-            }
-            // An empty szTip is not "no name". The shell keeps the last tooltip
-            // and otherwise shows InitialTooltip from NotifyIconSettings.
+            // An empty szTip is not "no name". The shell keeps InitialTooltip,
+            // and otherwise the executable's own description ("NVIDIA Broadcast").
             let tip = if icon.tip.trim().is_empty() {
                 matched
                     .as_ref()
                     .and_then(|entry| entry.tooltip.clone())
                     .filter(|stored| !stored.trim().is_empty())
+                    .or_else(|| host::program_name(&exe))
                     .unwrap_or_default()
             } else {
                 icon.tip.clone()
@@ -776,7 +857,7 @@ fn items_from_host(icons: &[host::HostIcon], prefs: &Prefs) -> Vec<TrayItem> {
                 x: 0,
                 y: 0,
                 registry_key: matched.as_ref().map(|entry| entry.key.clone()),
-                promoted: false,
+                promoted,
                 host_key: Some(icon.key.clone()),
             })
         })
