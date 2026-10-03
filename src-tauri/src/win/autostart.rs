@@ -40,17 +40,17 @@ pub fn is_enabled() -> bool {
 pub fn set(enabled: bool) -> anyhow::Result<()> {
     let key = RegKey::predef(HKEY_CURRENT_USER)
         .open_subkey_with_flags(RUN, KEY_READ | KEY_WRITE)
-        .context("die Autostart-Liste liess sich nicht oeffnen")?;
+        .context("cannot open the autostart list")?;
 
     if enabled {
-        let path = executable().context("der eigene Pfad liess sich nicht ermitteln")?;
+        let path = executable().context("cannot determine the path of the executable")?;
         // Quoted because Windows parses the value as a command line and the
         // folder can contain spaces.
         key.set_value(NAME, &format!("\"{}\"", path.display()))
-            .context("der Autostart-Eintrag liess sich nicht schreiben")?;
+            .context("cannot write the autostart entry")?;
     } else if key.get_value::<String, _>(NAME).is_ok() {
         key.delete_value(NAME)
-            .context("der Autostart-Eintrag liess sich nicht entfernen")?;
+            .context("cannot remove the autostart entry")?;
     }
 
     Ok(())

@@ -10,6 +10,13 @@ import {
 } from "lucide-react";
 
 import { api, events, type About, type Prefs, type TrayItem, type TrayList } from "@/lib/ipc";
+import {
+  faultText,
+  LANG_CHOICES,
+  resolveLang,
+  translator,
+  type Translate,
+} from "@/lib/i18n";
 import { cn, squeeze } from "@/lib/utils";
 
 const EMPTY: TrayList = { items: [], error: null, source: "", opening: false };
@@ -20,10 +27,26 @@ const EMPTY: TrayList = { items: [], error: null, source: "", opening: false };
  * the write happens once the hand comes off. */
 const SETTINGS_SAVE_DELAY = 180;
 
+/** The shell's build number as one line, in whichever language is in use. */
+function shellLabel(build: string, t: Translate): string {
+  return build ? t("settings.shellBuild", { build }) : t("settings.shellUnknown");
+}
+
 /** Row height and fixed chrome, which must stay in step with `overlay.rs`: the
  * window is sized from those numbers, and this is what fills that height. */
 const ROW_HEIGHT = 38;
 const CHROME = 104;
+
+/** An IPC failure in the shape both ends agreed on.
+ *
+ * Commands answer with a code and, when there is one, what Windows said about it.
+ * Anything else arriving here was not meant to be shown, so it gets a code too. */
+function asFault(error: unknown): { code: string; detail?: string } {
+  if (error && typeof error === "object" && "code" in error) {
+    return error as { code: string; detail?: string };
+  }
+  return { code: "unknown", detail: String(error) };
+}
 
 export default function App() {
   const [list, setList] = useState<TrayList>(EMPTY);
@@ -35,9 +58,21 @@ export default function App() {
   const [dark, setDark] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // The shell's own answer, until it arrives: English is the fallback language, so
+  // it is also the fallback before anything is known.
+  const [systemLang, setSystemLang] = useState<string>("en");
 
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const lang = resolveLang(prefs?.lang, systemLang);
+  const t = useMemo(() => translator(lang), [lang]);
+
+  // The document's language is set along with its words: it is what a screen reader
+  // picks its pronunciation from.
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   // Every opening publishes a fresh list, so that is also the moment to reset
   // the filter and hand the keyboard to the search box.
@@ -78,6 +113,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    void api.systemLang().then(setSystemLang);
     void api
       .getPrefs()
       .then(setPrefs)
@@ -139,9 +175,9 @@ export default function App() {
         ),
       }));
     } catch (error) {
-      console.warn("TrayList: could not change the tray visibility", error);
+      console.warn("TrayList:", faultText(asFault(error), t));
     }
-  }, []);
+  }, [t]);
 
   // Preferences are edited locally first and written a moment later, so that
   // dragging a slider is one save rather than a dozen, each of which would re-place
@@ -158,11 +194,11 @@ export default function App() {
     const timer = window.setTimeout(() => {
       setDirty(false);
       void api.setPrefs(prefs).catch((error) => {
-        console.warn("TrayList: could not save the settings", error);
+        console.warn("TrayList:", faultText(asFault(error), t));
       });
     }, SETTINGS_SAVE_DELAY);
     return () => window.clearTimeout(timer);
-  }, [prefs, dirty]);
+  }, [prefs, dirty, t]);
 
   const toggleSort = useCallback(() => {
     editPrefs({ sort: prefs?.sort === "name" ? "tray" : "name" });
@@ -244,7 +280,7 @@ export default function App() {
                 setQuery(event.target.value);
                 setCursor(0);
               }}
-              placeholder="Suchen…"
+              placeholder={t("search.placeholder")}
               spellCheck={false}
               autoComplete="off"
               className="h-[30px] w-full rounded-md border border-line bg-elevated pl-7 pr-7 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
@@ -252,7 +288,7 @@ export default function App() {
             {query.length > 0 && (
               <button
                 type="button"
-                title="Filter löschen"
+                title={t("search.clear")}
                 onClick={() => {
                   setQuery("");
                   searchRef.current?.focus();
@@ -265,11 +301,7 @@ export default function App() {
           </div>
 
           <IconButton
-            title={
-              prefs?.sort === "name"
-                ? "Alphabetisch sortiert – klicken für Tray-Reihenfolge"
-                : "In Tray-Reihenfolge – klicken für alphabetisch"
-            }
+            title={prefs?.sort === "name" ? t("sort.toName") : t("sort.toTray")}
             active={prefs?.sort === "name"}
             onClick={() => void toggleSort()}
           >
@@ -277,7 +309,7 @@ export default function App() {
           </IconButton>
 
           <IconButton
-            title="Einstellungen"
+            title={t("toolbar.settings")}
             active={settingsOpen}
             onClick={() => {
               setSettingsOpen((open) => !open);
@@ -291,7 +323,7 @@ export default function App() {
         {list.error ? (
           <div className="mx-2 mb-1.5 flex items-start gap-2 rounded-md border border-line bg-elevated px-2.5 py-2 text-[11.5px] leading-snug text-warn">
             <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-            <span>{list.error}</span>
+            <span>{faultText(list.error, t)}</span>
           </div>
         ) : null}
 
@@ -303,6 +335,7 @@ export default function App() {
               position={position}
               highlighted={position === cursor}
               busy={busy === item.index}
+              t={t}
               onHover={() => setCursor(position)}
               onActivate={(button) => void activate(item, button)}
               onTogglePin={() => void togglePin(item)}
@@ -312,12 +345,12 @@ export default function App() {
           {visible.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
               <span className="text-[12.5px] text-ink-muted">
-                {total === 0 ? "Keine Symbole gelesen." : "Nichts gefunden."}
+                {total === 0 ? t("list.none") : t("list.noMatch")}
               </span>
               <span className="text-[11px] leading-snug text-ink-faint">
                 {total === 0
-                  ? "Öffne den Tray über den Pfeil – TrayList liest die Symbole mit, sobald sie sichtbar sind."
-                  : `„${query}“ passt zu keinem der ${total} Symbole.`}
+                  ? t("list.noneHint")
+                  : t("list.noMatchHint", { query, total })}
               </span>
             </div>
           ) : null}
@@ -328,13 +361,13 @@ export default function App() {
             {query.trim() ? (
               // While filtering, how many icons are left is the useful number.
               // The rest of the time it is the build this panel came from.
-              <span className="whitespace-nowrap" title={list.source}>
-                {visible.length} von {total}
+              <span className="whitespace-nowrap" title={shellLabel(list.source, t)}>
+                {t("list.count", { shown: visible.length, total })}
               </span>
             ) : about ? (
               <span
                 className="truncate"
-                title={`${about.shell} / v${about.version} ${about.built}`}
+                title={`${shellLabel(about.shell, t)} / v${about.version} ${about.built}`}
               >
                 v{about.version} {about.built}
               </span>
@@ -343,9 +376,9 @@ export default function App() {
           <span className="flex items-center gap-2.5">
             {/* The keys only, with what they do on hover: the build stamp needs
                 the room more than three words nobody reads twice do. */}
-            <Hint keys="↑↓" title="Mit den Pfeiltasten bewegen" />
-            <Hint keys="Enter" title="Das gewählte Symbol öffnen" />
-            <Hint keys="Esc" title="Die Liste schließen" />
+            <Hint keys="↑↓" title={t("keys.move")} />
+            <Hint keys="Enter" title={t("keys.open")} />
+            <Hint keys="Esc" title={t("keys.close")} />
           </span>
         </div>
 
@@ -354,6 +387,7 @@ export default function App() {
             prefs={prefs}
             about={about}
             dark={dark}
+            t={t}
             onChange={editPrefs}
             onOpenConfig={() => void api.openConfig()}
             onClose={() => setSettingsOpen(false)}
@@ -369,6 +403,7 @@ function Row({
   position,
   highlighted,
   busy,
+  t,
   onHover,
   onActivate,
   onTogglePin,
@@ -377,6 +412,7 @@ function Row({
   position: number;
   highlighted: boolean;
   busy: boolean;
+  t: Translate;
   onHover: () => void;
   onActivate: (button: "left" | "right") => void;
   onTogglePin: () => void;
@@ -413,7 +449,7 @@ function Row({
 
       <span className="min-w-0 flex-1 leading-tight">
         <span className="block truncate text-[12.5px] font-medium text-ink">
-          {item.title || "(ohne Namen)"}
+          {item.title || t("row.unnamed")}
         </span>
         {/* Only real information here. Every icon in this list is behind the
             chevron by definition, so saying so would be noise on every row; a
@@ -421,7 +457,7 @@ function Row({
             icon is pinned in the visible part of the tray. */}
         {item.detail || item.promoted ? (
           <span className="block truncate text-[10.5px] text-ink-faint">
-            {item.detail ? squeeze(item.detail, 96) : "im Tray sichtbar"}
+            {item.detail ? squeeze(item.detail, 96) : t("row.promoted")}
           </span>
         ) : null}
       </span>
@@ -431,7 +467,7 @@ function Row({
       {item.registryKey ? (
         <button
           type="button"
-          title={item.promoted ? "Nicht mehr immer anzeigen" : "Immer im Tray anzeigen"}
+          title={item.promoted ? t("row.unpin") : t("row.pin")}
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
@@ -510,6 +546,7 @@ function SettingsPanel({
   prefs,
   about,
   dark,
+  t,
   onChange,
   onOpenConfig,
   onClose,
@@ -517,6 +554,7 @@ function SettingsPanel({
   prefs: Prefs | null;
   about: About | null;
   dark: boolean;
+  t: Translate;
   onChange: (patch: Partial<Prefs>) => void;
   onOpenConfig: () => void;
   onClose: () => void;
@@ -541,7 +579,7 @@ function SettingsPanel({
       // switch has to show that instead of pretending it worked.
       setAutostart(await api.setAutostart(!autostart));
     } catch (error) {
-      console.warn("TrayList: could not change the autostart entry", error);
+      console.warn("TrayList:", faultText(asFault(error), t));
     }
   };
 
@@ -552,10 +590,10 @@ function SettingsPanel({
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-surface">
       <div className="flex shrink-0 items-center justify-between border-b border-line px-2.5 py-2">
-        <span className="text-[12.5px] font-medium text-ink">Einstellungen</span>
+        <span className="text-[12.5px] font-medium text-ink">{t("settings.title")}</span>
         <button
           type="button"
-          title="Schließen"
+          title={t("settings.close")}
           onClick={onClose}
           className="flex h-6 w-6 items-center justify-center rounded text-ink-faint hover:bg-elevated hover:text-ink"
         >
@@ -566,58 +604,69 @@ function SettingsPanel({
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {prefs ? (
           <>
-            <Group title="Darstellung">
+            <Group title={t("settings.appearance")}>
               <Slider
-                label="Höhe der Liste"
+                label={t("settings.height")}
                 value={prefs.panelMaxHeight}
                 min={320}
                 max={1400}
                 step={20}
-                hint={rows > 0 ? `bis zu ${rows} Zeilen` : ""}
+                hint={rows > 0 ? t("settings.heightHint", { rows }) : ""}
                 onChange={(value) => onChange({ panelMaxHeight: value })}
               />
               <Slider
-                label="Abstand zur Taskleiste"
+                label={t("settings.gap")}
                 value={prefs.edgeGap}
                 min={0}
                 max={40}
                 step={1}
-                hint={prefs.edgeGap === 0 ? "bündig" : `${prefs.edgeGap} px`}
+                hint={prefs.edgeGap === 0 ? t("settings.flush") : `${prefs.edgeGap} px`}
                 onChange={(value) => onChange({ edgeGap: value })}
               />
             </Group>
 
-            <Group title="Verhalten">
+            <Group title={t("settings.behaviour")}>
               <Switch
-                label="Mit Windows starten"
+                label={t("settings.autostart")}
                 checked={autostart === true}
                 disabled={autostart === null}
                 onChange={() => void toggleAutostart()}
               />
               <Switch
-                label="Immer sichtbare zuerst"
+                label={t("settings.pinnedFirst")}
                 checked={prefs.pinnedFirst}
                 onChange={(value) => onChange({ pinnedFirst: value })}
               />
               <Switch
-                label="Suchfeld anzeigen"
+                label={t("settings.showSearch")}
                 checked={prefs.showSearch}
                 onChange={(value) => onChange({ showSearch: value })}
               />
               <Switch
-                label="Alphabetisch sortieren"
+                label={t("settings.sortByName")}
                 checked={prefs.sort === "name"}
                 onChange={(value) => onChange({ sort: value ? "name" : "tray" })}
+              />
+            </Group>
+
+            <Group title={t("settings.language")}>
+              {/* The three choices rather than a switch: `system` is a third state,
+                  and a two-state control would force a guess about which language
+                  the shell is actually in. */}
+              <Choice
+                options={LANG_CHOICES}
+                value={prefs.lang}
+                onChange={(value) => onChange({ lang: value })}
               />
             </Group>
           </>
         ) : (
           <p className="text-[11.5px] text-ink-muted">
-            Die Einstellungen ließen sich nicht laden.
+            {t("settings.unavailable")}
           </p>
         )}
 
-        <Group title="Über">
+        <Group title={t("settings.about")}>
           {/* The badge is the site's, kept as it is served: ink on a dark panel,
               paper on a light one. Hotlinking the original would leave the panel
               dependent on the network for its own credit line, so a copy lives in
@@ -642,10 +691,10 @@ function SettingsPanel({
           </a>
 
           <dl className="mt-2.5">
-            <Fact label="Version">
+            <Fact label={t("settings.version")}>
               v{about?.version ?? "?"} {about?.built ?? ""}
             </Fact>
-            <Fact label="Shell">{about?.shell ?? "?"}</Fact>
+            <Fact label={t("settings.shell")}>{shellLabel(about?.shell ?? "", t)}</Fact>
           </dl>
 
           <button
@@ -653,7 +702,7 @@ function SettingsPanel({
             onClick={onOpenConfig}
             className="mt-2 text-[10.5px] text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink"
           >
-            config-Ordner öffnen
+            {t("settings.openConfig")}
           </button>
         </Group>
       </div>
@@ -664,7 +713,7 @@ function SettingsPanel({
           onClick={onClose}
           className="rounded-md border border-accent bg-accent-soft px-2.5 py-1 text-[11.5px] font-medium text-accent"
         >
-          Fertig
+          {t("settings.done")}
         </button>
       </div>
     </div>
@@ -769,5 +818,41 @@ function Switch({
         />
       </span>
     </button>
+  );
+}
+
+/** A row of small buttons, for a setting with a handful of named values.
+ *
+ * All of them are on screen at once, which is the point: the alternative for
+ * something like the language would be a drop-down that hides the choices behind
+ * one more click. */
+function Choice<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex gap-1">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={option.value === value}
+          onClick={() => onChange(option.value)}
+          className={cn(
+            "min-w-0 flex-1 truncate rounded-md border px-1.5 py-1 text-[11.5px]",
+            option.value === value
+              ? "border-accent bg-accent-soft text-accent"
+              : "border-line bg-elevated text-ink-muted hover:text-ink",
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }

@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::overlay;
 use crate::state::{AppState, Request, Shared};
-use crate::types::{Prefs, SortMode, TrayItem, TrayList};
+use crate::types::{Fault, Prefs, SortMode, TrayItem, TrayList};
 use crate::win::{capture, forward, island, registry, uia};
 
 /// How often the flyout is looked for. Well below the point where a click feels
@@ -162,11 +162,11 @@ fn handle_request(
             }
 
             let Some(reader) = reader else {
-                publish_error(app, "UI Automation ist auf diesem System nicht verfügbar.");
+                publish_error(app, Fault::new("uia_missing"));
                 return;
             };
             let Some(taskbar) = island::find_by_class(island::TASKBAR_CLASS) else {
-                publish_error(app, "Die Taskleiste wurde nicht gefunden.");
+                publish_error(app, Fault::new("no_taskbar"));
                 return;
             };
 
@@ -175,13 +175,8 @@ fn handle_request(
                 Ok(Some(chevron)) => {
                     let _ = reader.invoke(&chevron);
                 }
-                Ok(None) => publish_error(
-                    app,
-                    "Der Pfeil fuer ausgeblendete Symbole wurde nicht gefunden.",
-                ),
-                Err(error) => {
-                    publish_error(app, &format!("Der Pfeil liess sich nicht lesen: {error}"))
-                }
+                Ok(None) => publish_error(app, Fault::new("no_chevron")),
+                Err(error) => publish_error(app, Fault::with("chevron_unreadable", error)),
             }
         }
 
@@ -543,7 +538,7 @@ pub fn apply_order(items: &mut [TrayItem], prefs: &Prefs) {
     }
 }
 
-fn publish(app: &AppHandle, items: Vec<TrayItem>, error: Option<String>) {
+fn publish(app: &AppHandle, items: Vec<TrayItem>, error: Option<Fault>) {
     let payload = TrayList {
         items,
         error,
@@ -559,13 +554,16 @@ fn publish(app: &AppHandle, items: Vec<TrayItem>, error: Option<String>) {
     let _ = app.emit(EVENT_THEME, crate::win::theme::is_dark());
 }
 
-fn publish_error(app: &AppHandle, message: &str) {
-    eprintln!("TrayList: {message}");
-    publish(app, Vec::new(), Some(message.to_string()));
+fn publish_error(app: &AppHandle, fault: Fault) {
+    eprintln!("TrayList: {fault}");
+    publish(app, Vec::new(), Some(fault));
 }
 
 /// The shell build the list was read from. Cheap to cache, and genuinely useful
 /// in a bug report about a flyout that changed shape.
+///
+/// Only the number, without any wording: the panel is the one that knows which
+/// language to put around it, and an empty string means the shell would not say.
 pub fn shell_build() -> String {
     static BUILD: OnceLock<String> = OnceLock::new();
     BUILD
@@ -574,8 +572,7 @@ pub fn shell_build() -> String {
             winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
                 .open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
                 .and_then(|key| key.get_value::<String, _>("CurrentBuildNumber"))
-                .map(|build| format!("Windows build {build}"))
-                .unwrap_or_else(|_| "unbekannter Windows-Build".to_string())
+                .unwrap_or_default()
         })
         .clone()
 }

@@ -170,13 +170,58 @@ const AML_COLON: &str = ":\u{20}";
 /// separators applications use between the two, in the order they turn up.
 const SEPARATORS: [char; 6] = ['-', '\u{2013}', '\u{2014}', ':', '|', '\u{00b7}'];
 
+/// Something that went wrong, in a shape the panel can put into words.
+///
+/// The sentence is written in the panel, so a code travels instead of a finished
+/// German one: an error in German inside an English panel would give the lie to
+/// the language setting. `detail` is whatever Windows or the registry said, which
+/// is in the language Windows itself is installed in, and is passed through as it
+/// came.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Fault {
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl Fault {
+    /// A failure that needs nothing beyond its own code.
+    pub fn new(code: &str) -> Self {
+        Self {
+            code: code.to_string(),
+            detail: None,
+        }
+    }
+
+    /// A failure with what the system underneath said about it.
+    pub fn with(code: &str, detail: impl std::fmt::Display) -> Self {
+        Self {
+            code: code.to_string(),
+            detail: Some(detail.to_string()),
+        }
+    }
+}
+
+/// How a fault reads in the log, where there is no language to choose from.
+impl std::fmt::Display for Fault {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.detail {
+            Some(detail) => write!(formatter, "{}: {detail}", self.code),
+            None => write!(formatter, "{}", self.code),
+        }
+    }
+}
+
+impl std::error::Error for Fault {}
+
 /// The snapshot the overlay draws.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrayList {
     pub items: Vec<TrayItem>,
     /// Set when the read failed, so the UI can say so instead of looking empty.
-    pub error: Option<String>,
+    pub error: Option<Fault>,
     /// Which shell build the shape of the flyout was read from, useful in bug
     /// reports.
     pub source: String,
@@ -215,6 +260,9 @@ pub struct Prefs {
     pub hotkey: Option<String>,
     /// Order pinned icons first.
     pub pinned_first: bool,
+    /// Which language the panel speaks: `de`, `en`, or `system` for whatever the
+    /// shell is set to. Anything unrecognised counts as `system`.
+    pub lang: String,
 }
 
 impl Prefs {
@@ -234,6 +282,7 @@ impl Default for Prefs {
             show_search: true,
             hotkey: Some(Self::DEFAULT_HOTKEY.to_string()),
             pinned_first: false,
+            lang: "system".to_string(),
         }
     }
 }

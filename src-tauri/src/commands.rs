@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 
 use crate::overlay;
 use crate::state::{AppState, Request};
-use crate::types::{About, Prefs, TrayList};
+use crate::types::{About, Fault, Prefs, TrayList};
 use crate::win::registry;
 use crate::EmitList;
 
@@ -23,11 +23,11 @@ pub fn activate(
     state: State<'_, AppState>,
     index: usize,
     button: String,
-) -> Result<(), String> {
+) -> Result<(), Fault> {
     let item = state
         .shared
         .item_at(index)
-        .ok_or_else(|| "Dieser Eintrag existiert nicht mehr.".to_string())?;
+        .ok_or_else(|| Fault::new("item_gone"))?;
 
     let sent = state.shared.send(Request::Click {
         x: item.x,
@@ -35,7 +35,7 @@ pub fn activate(
         right: button == "right",
     });
     if !sent {
-        return Err("Der Hintergrunddienst laeuft nicht.".to_string());
+        return Err(Fault::new("worker_down"));
     }
     Ok(())
 }
@@ -81,11 +81,15 @@ pub fn dark_theme() -> bool {
 /// gap to the taskbar feel like live controls rather than settings that only count
 /// next time.
 #[tauri::command]
-pub fn set_prefs(app: AppHandle, state: State<'_, AppState>, prefs: Prefs) -> Result<Prefs, String> {
+pub fn set_prefs(app: AppHandle, state: State<'_, AppState>, prefs: Prefs) -> Result<Prefs, Fault> {
     state
         .store
         .write(prefs.clone())
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| Fault::with("settings_write", error))?;
+
+    // The tray menu is drawn by Windows, not by us, so a language change has to be
+    // handed to the shell as a new menu rather than merely taken note of.
+    crate::retitle_tray(&app, &prefs);
 
     let mut items = state.shared.items();
     crate::watcher::apply_order(&mut items, &prefs);
@@ -110,8 +114,8 @@ pub fn get_autostart() -> bool {
 /// The result is read back rather than assumed, so a registry that refused the
 /// write shows up as the check box staying where it was.
 #[tauri::command]
-pub fn set_autostart(enabled: bool) -> Result<bool, String> {
-    crate::win::autostart::set(enabled).map_err(|error| error.to_string())?;
+pub fn set_autostart(enabled: bool) -> Result<bool, Fault> {
+    crate::win::autostart::set(enabled).map_err(|error| Fault::with("autostart_write", error))?;
     Ok(crate::win::autostart::is_enabled())
 }
 
@@ -127,8 +131,8 @@ pub fn about() -> About {
 
 /// Opens a link in the user's own browser.
 #[tauri::command]
-pub fn open_url(url: String) -> Result<(), String> {
-    crate::win::launch::url(&url).map_err(|error| error.to_string())
+pub fn open_url(url: String) -> Result<(), Fault> {
+    crate::win::launch::url(&url).map_err(|error| Fault::with("open_url", error))
 }
 
 /// Turns an icon on or off in the visible part of the tray, which is what the
@@ -139,16 +143,16 @@ pub fn set_pinned(
     state: State<'_, AppState>,
     index: usize,
     pinned: bool,
-) -> Result<(), String> {
+) -> Result<(), Fault> {
     let item = state
         .shared
         .item_at(index)
-        .ok_or_else(|| "Dieser Eintrag existiert nicht mehr.".to_string())?;
+        .ok_or_else(|| Fault::new("item_gone"))?;
     let key = item
         .registry_key
-        .ok_or_else(|| "Fuer dieses Symbol wurde kein Eintrag in der Registry gefunden.".to_string())?;
+        .ok_or_else(|| Fault::new("no_registry_entry"))?;
 
-    registry::set_promoted(&key, pinned).map_err(|error| error.to_string())?;
+    registry::set_promoted(&key, pinned).map_err(|error| Fault::with("registry_write", error))?;
     // Keep the panel's own idea of the icon honest.
     let mut items = state.shared.items();
     if let Some(target) = items.iter_mut().find(|candidate| candidate.index == index) {
@@ -163,13 +167,13 @@ pub fn set_pinned(
 
 /// Opens the folder the settings file lives in.
 #[tauri::command]
-pub fn open_config(state: State<'_, AppState>) -> Result<(), String> {
+pub fn open_config(state: State<'_, AppState>) -> Result<(), Fault> {
     let directory = state.store.directory().to_path_buf();
     std::process::Command::new("explorer")
         .arg(&directory)
         .spawn()
         .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| Fault::with("open_config", error))
 }
 
 /// Opens or closes the list without touching the chevron. Used by the hotkey and
@@ -177,4 +181,14 @@ pub fn open_config(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn toggle(state: State<'_, AppState>) {
     state.shared.send(Request::Toggle);
+}
+
+/// The language Windows' own interface is in, as `de` or `en`.
+///
+/// Asked for once at startup, because a `system` setting has to be resolved by
+/// whoever shows the words: the panel needs it for its own text, and Rust needs it
+/// for the tray menu.
+#[tauri::command]
+pub fn system_lang() -> String {
+    crate::i18n::Lang::resolve("system").tag().to_string()
 }

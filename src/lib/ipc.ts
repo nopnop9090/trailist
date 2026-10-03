@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+import type { LangPref } from "./i18n";
+
 /**
  * Typed mirror of the Rust IPC surface.
  *
@@ -31,9 +33,22 @@ export interface TrayItem {
   promoted: boolean;
 }
 
+/**
+ * Something that went wrong, as a code the panel puts into words.
+ *
+ * The sentence is written in the panel, so the code is what travels: an error in
+ * German inside an English panel would give the lie to the language setting.
+ * `detail` is what Windows said, unchanged and in Windows' own language.
+ */
+export interface Fault {
+  code: string;
+  detail?: string;
+}
+
 export interface TrayList {
   items: TrayItem[];
-  error: string | null;
+  /** Set when the read failed, so the panel can say so instead of looking empty. */
+  error: Fault | null;
   source: string;
   /**
    * Whether this is a fresh read, i.e. the panel just opened, rather than the same
@@ -63,6 +78,8 @@ export interface Prefs {
   showSearch: boolean;
   hotkey: string | null;
   pinnedFirst: boolean;
+  /** `de`, `en`, or `system` for whatever the shell is set to. */
+  lang: LangPref;
 }
 
 export type MouseButton = "left" | "right";
@@ -72,6 +89,8 @@ export const api = {
   activate: (index: number, button: MouseButton) =>
     invoke<void>("activate", { index, button }),
   dismiss: () => invoke<void>("dismiss"),
+  /** The language Windows' own interface is in, as `de` or `en`. */
+  systemLang: () => invoke<string>("system_lang"),
   current: () => invoke<TrayList>("current"),
   /** Whether the shell is dark, so the panel can follow it rather than guess. */
   darkTheme: () => invoke<boolean>("dark_theme"),
