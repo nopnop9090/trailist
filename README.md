@@ -8,6 +8,8 @@ Windows just opened, puts it away, and shows its own panel in the same corner:
 one row per icon, icon on the left, name and current state on the right, and a
 filter box for when there are forty of them.
 
+*English · [Deutsch](README.de.md)*
+
 ```
   ▸ you click ^ in the tray
   ▸ TrayList reads the icons and their tooltips, and grabs their bitmaps
@@ -27,7 +29,7 @@ and a React panel for the list. No injection, no shell hooks, no elevation.
 |---|---|
 | **What** | The Windows 11 tray overflow, as a named and filterable list instead of a grid of 16x16 glyphs. |
 | **Who** | Written for one very full tray, with an AI assistant doing the typing — which is what the badge at the bottom is about. |
-| **When** | Version `0.2.0`. The build stamp is baked in at compile time and shown in the panel's footer, in the settings dialog, and to `trailist-probe theme`. |
+| **When** | Version `0.3.0`. The build stamp is baked in at compile time and shown in the panel's footer, in the settings dialog, and to `trailist-probe theme`. |
 | **How** | A Rust core reads the shell's own flyout through UI Automation and takes its place; a React panel draws the list. Settings live in `config/settings.json` next to the exe. |
 
 The settings dialog, including where the badge and the version live:
@@ -63,6 +65,8 @@ just are not shown anywhere at once. That is the whole problem this solves.
 - How much air to leave between the panel and the taskbar, from flush to 40 px
 - Start with Windows, via the per-user autostart entry Windows itself reads
 - Filter box on or off, always-visible icons first, alphabetical or tray order
+- Language: `system`, `de` or `en`. The panel, the tray menu and the error messages
+  all follow it; anything that is not German gets English rather than a mixture
 
 **Tray attributes**
 - Optional pin button per row: turns an icon on or off in the *visible* part of
@@ -137,6 +141,7 @@ folder.
 | `showSearch` | true | Show the filter box. |
 | `hotkey` | `Alt+Shift+T` | Global hotkey. Set `null` to disable. |
 | `pinnedFirst` | false | Sort icons that are visible in the tray first. |
+| `lang` | `system` | `de`, `en`, or `system` for the language Windows' own interface is in. Anything else counts as `system`. |
 
 Starting with Windows is not in this file: it is a real
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry, which is where
@@ -216,17 +221,24 @@ Details worth knowing, because they are what makes this feel native:
   from the tree until the taskbar is up, so `Alt+Shift+T` has nothing to invoke
   and reports that it could not find it. Clicking the chevron is unaffected,
   because that is what reveals the taskbar in the first place.
+- **Error messages are bilingual in one line each.** The sentence itself is written
+  by the panel, so it is in the language that is set; what Windows said about the
+  failure is appended unchanged, because it is Windows' own wording in Windows' own
+  language. Only the two languages exist, and everything that is not German gets
+  English.
 
 ## Layout
 
 ```
 src/                     React panel (the list and the settings dialog)
+src/lib/i18n.ts          the panel's German and English strings
 src-tauri/src/
   watcher.rs             the state machine: detect, read, hide, show, dismiss
   overlay.rs             panel geometry and placement
   commands.rs            IPC surface
   settings.rs            config/settings.json
   types.rs               what crosses the bridge, and how a tooltip becomes a row
+  i18n.rs                the language setting, and the tray menu's own strings
   version.rs             the version label the panel shows
   win/island.rs          the overflow flyout window
   win/uia.rs             reading the icons
@@ -252,11 +264,16 @@ docs/screenshot-*.png    the two pictures above
 cargo test --manifest-path .\src-tauri\Cargo.toml
 ```
 
-One test, on the piece with real guesswork in it: turning the tooltips this
-machine's tray actually produces into a name and a state. Every case in it came
-off a real tray, including the awkward ones — the name repeated on one line, the
-name repeated across two, a name that merely shares a word, and a tooltip that is
-nothing but the name twice.
+Three tests. The first is on the piece with real guesswork in it: turning the
+tooltips this machine's tray actually produces into a name and a state. Every
+case in it came off a real tray, including the awkward ones — the name repeated
+on one line, the name repeated across two, a name that merely shares a word, and
+a tooltip that is nothing but the name twice.
+
+Two more cover the language setting: that the setting wins over the system's
+language, and that every language has a complete tray menu. The frontend's own
+strings are checked by the compiler rather than by a test — the tables are one
+object each, so `tsc` is what catches a key that no longer exists.
 
 ## Credit
 
