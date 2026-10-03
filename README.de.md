@@ -262,7 +262,7 @@ public/badges/           das not-by-humans-Badge, eines pro Panel-Theme
 scripts/build.ps1        Release-Build
 scripts/make-icons.ps1   erzeugt den Symbolsatz
 docs/PLAN.md             was das ist, warum es so gebaut ist, was als Nächstes kommt
-docs/screenshot-*.png    die zwei Bilder oben
+docs/screenshot-*.png    die Bilder oben, ein Paar pro Sprache
 ```
 
 ## Tests

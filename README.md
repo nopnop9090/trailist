@@ -21,7 +21,7 @@ filter box for when there are forty of them.
 Built as a [Tauri v2](https://tauri.app) app: a Rust core that talks to the shell
 and a React panel for the list. No injection, no shell hooks, no elevation.
 
-![The list: one row per hidden icon, with names, states and a filter box](docs/screenshot-list.png)
+![The list: one row per hidden icon, with names, states and a filter box](docs/screenshot-list-en.png)
 
 ## What, who, when, how
 
@@ -34,7 +34,7 @@ and a React panel for the list. No injection, no shell hooks, no elevation.
 
 The settings dialog, including where the badge and the version live:
 
-![The settings dialog: height limit, gap to the taskbar, autostart, and the about block](docs/screenshot-settings.png)
+![The settings dialog: height limit, gap to the taskbar, language, and the about block](docs/screenshot-settings-en.png)
 
 ## Why this exists
 
@@ -255,7 +255,7 @@ public/badges/           the not-by-humans badge, one per panel theme
 scripts/build.ps1        release build
 scripts/make-icons.ps1   generates the icon set
 docs/PLAN.md             what this is, why it is built this way, what is next
-docs/screenshot-*.png    the two pictures above
+docs/screenshot-*.png    the pictures above, one pair per language
 ```
 
 ## Tests
