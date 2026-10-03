@@ -261,7 +261,8 @@ src-tauri/build.rs       stempelt den Build mit der lokalen Zeit des Compiler-Re
 public/badges/           das not-by-humans-Badge, eines pro Panel-Theme
 scripts/build.ps1        Release-Build
 scripts/make-icons.ps1   erzeugt den Symbolsatz
-docs/PLAN.md             was das ist, warum es so gebaut ist, was als Nächstes kommt
+docs/PLAN.md             die Planung und die Entscheidungen, auf Deutsch
+docs/PLAN.en.md          dieselbe Planung auf Englisch
 docs/screenshot-*.png    die Bilder oben, ein Paar pro Sprache
 ```
 

@@ -254,7 +254,8 @@ src-tauri/build.rs       stamps the build with the compiler host's local time
 public/badges/           the not-by-humans badge, one per panel theme
 scripts/build.ps1        release build
 scripts/make-icons.ps1   generates the icon set
-docs/PLAN.md             what this is, why it is built this way, what is next
+docs/PLAN.md             the plan and the decisions, in German
+docs/PLAN.en.md          the same plan and decisions, in English
 docs/screenshot-*.png    the pictures above, one pair per language
 ```
 

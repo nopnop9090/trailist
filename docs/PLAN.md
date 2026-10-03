@@ -1,5 +1,9 @@
 # TrayList — Plan, Was, Wie, Wann, Warum
 
+Die englische Fassung dieses Dokuments ist [PLAN.en.md](PLAN.en.md); beide sagen
+dasselbe. Die Dokumentation für Leser des Projekts sind [README.md](../README.md)
+und [README.de.md](../README.de.md).
+
 Kurzfassung: TrayList ersetzt das Raster-Flyout der Windows-11-Tray durch eine
 **vertikale, scrollbare Liste mit Namen**. Klick auf den Pfeil wie immer — gelesen
 wird das Fenster, das Windows gerade geöffnet hat, danach wird es ausgeblendet und
@@ -37,6 +41,7 @@ Flyout, nur lesbar.
 | Hotkey | `Alt+Shift+T` öffnet die Liste ohne Chevron |
 | Tray-Menü | Liste zeigen, Einstellungen öffnen, Beenden |
 | Geometrie | Panel am Flyout verankert, im Arbeitsbereich des richtigen Monitors, DPI-korrekt |
+| Sprache | Deutsch und Englisch, standardmäßig der Sprache der Shell folgend |
 
 **Nicht im Scope:** die Reihenfolge der Icons im echten Tray verändern, Icon-Designs
 ersetzen, Windows-10-Tray, Remote-Steuerung.
@@ -155,14 +160,30 @@ Alles auf **Windows 11 25H2, Build 26200** empirisch geprüft:
     warum in den Zeilen der Name doppelt stand. `TrayItem::compose` nimmt die
     längste führende Wortwiederholung ab und trimmt das Trennzeichen dahinter; der
     Test in `types.rs` läuft gegen die echten Tooltips dieses Rechners.
+14. **Zwei Sprachen, und Fehler reisen als Code.** Panel, Tray-Menü und
+    Fehlermeldungen folgen einer Einstellung `lang`, deren Standard `system` ist —
+    die Sprache der Windows-Oberfläche, mit Englisch als Rückfall für alles, was
+    nicht Deutsch ist. Eine Fehlermeldung reist deshalb nicht mehr als fertiger
+    deutscher Satz: sie reist als Code plus, wo Windows etwas zu sagen hatte, dessen
+    unverändertem Text, und der Satz entsteht dort, wo die Sprache bekannt ist.
+    `commands::system_lang` antwortet einmal beim Start, und `retitle_tray` gibt der
+    Shell ein neues Menü, wenn die Einstellung wandert.
+15. **Pfade verraten die Build-Maschine nicht.** rustc schreibt zu jeder Panic-Stelle
+    die Quelldatei mit, und bei Dependencies ist das ein absoluter Pfad unter dem
+    Benutzerprofil des Builders. `scripts/build.ps1` biegt diese Präfixe per
+    `--remap-path-prefix` um, mit den Präfixen aus der Umgebung, damit kein
+    rechnerspezifischer Text im Skript steht. Gleiches Binary, eine Sache weniger
+    drin.
 
 ### Repo-Struktur
 
 | Pfad | Rolle |
 |------|--------|
 | `src/` | React-Panel (die Liste) |
+| `src/lib/i18n.ts` | Die deutschen und englischen Texte des Panels |
 | `src-tauri/src/watcher.rs` | Zustandsautomat |
 | `src-tauri/src/overlay.rs` | Geometrie und Platzierung |
+| `src-tauri/src/i18n.rs` | Die Sprachauswahl und die Texte des Tray-Menüs |
 | `src-tauri/src/win/` | Die Shell-Berührungspunkte |
 | `src-tauri/src/win/theme.rs` | Helles oder dunkles Shell-Schema |
 | `src-tauri/src/win/autostart.rs` | Der Run-Eintrag für „mit Windows starten" |
@@ -218,7 +239,10 @@ schnellsten, was der neue Build liefert.
 - [x] Panel folgt dem Shell-Farbschema (`SystemUsesLightTheme`)
 - [x] not-by-humans-Badge im Dialog, hell und dunkel, mit Rücklink
 - [x] Tooltip-Wiederholung im Namen entfernt, mit Test gegen echte Tooltips
-- [x] README mit Screenshots, Version, Lizenz-/Credit-Hinweis
+- [x] Deutsch und Englisch in Panel, Tray-Menü und in den Fehlermeldungen
+- [x] README mit Screenshots, Version, Lizenz-/Credit-Hinweis — als Paar, eine
+      Fassung je Sprache
+- [x] Repo veröffentlicht: `nopnop9090/trailist` mit Release `v0.3.0`
 
 ### Offen / optional
 - [ ] **Reaktion beschleunigen / Raster ganz vermeiden.** Zwei Wege, beide mit
@@ -290,4 +314,5 @@ cargo run --manifest-path .\src-tauri\Cargo.toml --bin trailist-probe -- watch
 notepad .\config\settings.json
 ```
 
-Siehe auch: [README.md](../README.md).
+Siehe auch: [README.md](../README.md) · [README.de.md](../README.de.md) ·
+[PLAN.en.md](PLAN.en.md) (englisch).
