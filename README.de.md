@@ -33,7 +33,7 @@ der Rechte.
 |---|---|
 | **Was** | Der Windows-11-Tray-Überlauf als benannte und filterbare Liste statt als Raster aus 16×16-Piktogrammen. |
 | **Wer** | Geschrieben für einen sehr vollen Tray, mit einem KI-Assistenten als Tippkraft — darum geht es beim Badge unten. |
-| **Wann** | Version `0.4.0`. Der Build-Stempel wird beim Kompilieren eingebacken und im Footer des Panels, im Einstellungsdialog und für `trailist-probe theme` angezeigt. |
+| **Wann** | Version `0.5.0`. Der Build-Stempel wird beim Kompilieren eingebacken und im Footer des Panels, im Einstellungsdialog und für `trailist-probe theme` angezeigt. |
 | **Wie** | Eine kleine DLL in Explorer merkt sich jede `Shell_NotifyIcon`-Registrierung und leitet Hover und Klicks an dieses Fenster weiter. Ein React-Panel zeichnet die Liste. Hängt sich die DLL nicht ein, bleibt der bisherige UI-Automation-Weg, und das Panel sagt das. Die Einstellungen liegen in `config/settings.json` neben der Exe. |
 
 Der Einstellungsdialog, samt Badge und Version:
@@ -59,6 +59,10 @@ die Tooltips — sie stehen nur nirgends auf einmal. Genau das löst dieses Prog
 - Rechtsklick auf eine Zeile öffnet das Kontextmenü des Symbols. Die Liste bleibt
   offen, bis daneben geklickt wird, ein zweiter Rechtsklick heißt also nicht, das
   Panel erneut zu öffnen
+- Ein Doppelklick wird als Doppelklick weitergereicht. Der Einfachklick wartet die
+  Doppelklick-Zeit des Systems ab, damit ein Symbol, das sich per Doppelklick
+  öffnet, und eines, das beim Einfachklick ein Menü zeigt, sich wie im Tray verhalten
+- Ein erneuter Start findet die bereits laufende Kopie
 - Panel passend zum Inhalt, auf den geklickten Pfeil zentriert und auf der
   Taskleiste aufsitzend, immer innerhalb des Arbeitsbereichs des richtigen Monitors
 - Folgt dem Farbschema der Shell: die Palette kommt aus `SystemUsesLightTheme`,

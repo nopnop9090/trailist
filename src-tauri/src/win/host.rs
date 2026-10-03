@@ -100,6 +100,48 @@ impl HostIcon {
         }
     }
 
+    /// Double-click, and nothing else.
+    ///
+    /// The single click is held back until the double-click time has passed,
+    /// so this is the whole gesture. A trailing button-up is what Steam treats
+    /// as "open the menu". Version 0 and 3 want `WM_LBUTTONDBLCLK` (`0x203`)
+    /// with the icon id in `wParam`. Version 4 packs the same event into
+    /// `lParam` with the cursor in `wParam`.
+    pub fn post_double(&self) {
+        if self.callback == 0 || !self.window_alive() {
+            return;
+        }
+        let window = hwnd_from(self.hwnd);
+        let messaging = windows::Win32::UI::WindowsAndMessaging::SendNotifyMessageW;
+        if self.version_known && self.version >= 4 {
+            let mut point = POINT { x: 0, y: 0 };
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point);
+            }
+            let x = point.x as i16 as u16 as u32;
+            let y = point.y as i16 as u16 as u32;
+            let wparam = ((y << 16) | x) as usize;
+            let lparam = ((self.id & 0xFFFF) << 16) | 0x0203;
+            let _ = unsafe {
+                messaging(
+                    window,
+                    self.callback,
+                    windows::Win32::Foundation::WPARAM(wparam),
+                    windows::Win32::Foundation::LPARAM(lparam as isize),
+                )
+            };
+            return;
+        }
+        let _ = unsafe {
+            messaging(
+                window,
+                self.callback,
+                windows::Win32::Foundation::WPARAM(self.id as usize),
+                windows::Win32::Foundation::LPARAM(0x0203),
+            )
+        };
+    }
+
     /// Classic hover. Version 0 windows are told with `WM_MOUSEMOVE`.
     pub fn post_legacy_move(&self) {
         if self.callback == 0 || !self.window_alive() {
@@ -250,6 +292,10 @@ struct Reply {
     /// never seen. Absent on the build that still guesses version 4.
     #[serde(default)]
     unknown_is_classic: bool,
+    /// Set by a host that posts `WM_LBUTTONDBLCLK` for button `"double"`.
+    /// Absent on a build that turns that button into another single click.
+    #[serde(default)]
+    posts_double: bool,
     icons: Vec<HostIcon>,
 }
 
@@ -269,6 +315,8 @@ pub struct Session {
     revision: u64,
     /// The host posts version-0 callbacks itself when the version was never set.
     pub unknown_is_classic: bool,
+    /// The host understands a double-click and posts `WM_LBUTTONDBLCLK` itself.
+    pub posts_double: bool,
     pub icons: Vec<HostIcon>,
 }
 
@@ -337,11 +385,11 @@ impl Session {
         self.roundtrip(&body.to_string()).is_some()
     }
 
-    pub fn activate(&mut self, key: &str, right: bool, anchor: ScreenRect) -> bool {
+    pub fn activate(&mut self, key: &str, button: &str, anchor: ScreenRect) -> bool {
         let body = serde_json::json!({
             "op": "activate",
             "key": key,
-            "button": if right { "right" } else { "left" },
+            "button": button,
             "anchor": rect_json(anchor),
         });
         self.roundtrip(&body.to_string()).is_some()
@@ -373,6 +421,7 @@ impl Session {
         }
         let reply: Reply = serde_json::from_slice(&buffer[..read as usize]).ok()?;
         self.unknown_is_classic = reply.unknown_is_classic;
+        self.posts_double = reply.posts_double;
         Some(reply)
     }
 }
@@ -570,6 +619,7 @@ fn connect(pid: u32) -> Option<Session> {
         bound: false,
         revision: 0,
         unknown_is_classic: false,
+        posts_double: false,
         icons: Vec::new(),
     })
 }

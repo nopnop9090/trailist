@@ -319,6 +319,8 @@ fn handle_request(
         Request::Click {
             index,
             right,
+            double_click,
+            keep,
             anchor,
         } => {
             if let Some(session) = host.as_mut() {
@@ -331,32 +333,47 @@ fn handle_request(
                         if let Some(icon) = icon.as_ref() {
                             host::grant_foreground(icon.hwnd);
                         }
-                        // A left click leaves for the app. A right click keeps
-                        // the list, so the next row can be opened without the
-                        // chevron. The app's menu takes the foreground; blur
-                        // must not treat that as clicking away.
+                        // A finished left click or a double-click leaves for the
+                        // app. The first half of a double-click stays up, so the
+                        // second click can still land on the row. A right click
+                        // stays up until the user clicks away.
                         if right {
                             shared.set_menu_hold(true);
-                        } else {
+                        } else if !keep {
                             overlay::hide(app);
                             shared.set_visible(false);
                             std::thread::sleep(PANEL_GOES_AWAY);
                         }
-                        let supplement = icon.as_ref().is_some_and(|icon| {
-                            !session.unknown_is_classic && !icon.version_known
-                        });
-                        if session.activate(&key, right, anchor) {
-                            *gesture_until = Instant::now() + Duration::from_secs(3);
-                        }
-                        // After the gesture is held, so GetRect during the
-                        // handler names this row. The host's own message is the
-                        // version-4 one these windows ignore.
-                        if supplement {
-                            if let Some(icon) = icon.as_ref() {
-                                icon.post_legacy(right);
+                        if double_click {
+                            // A host that does not know "double" turns it into
+                            // another single click. Post the double-click from
+                            // here instead. The first click already held the
+                            // gesture, so GetRect still names this row.
+                            if session.posts_double {
+                                if session.activate(&key, "double", anchor) {
+                                    *gesture_until = Instant::now() + Duration::from_secs(3);
+                                }
+                            } else if let Some(icon) = icon.as_ref() {
+                                icon.post_double();
+                            }
+                        } else {
+                            let supplement = icon.as_ref().is_some_and(|icon| {
+                                !session.unknown_is_classic && !icon.version_known
+                            });
+                            let button = if right { "right" } else { "left" };
+                            if session.activate(&key, button, anchor) {
+                                *gesture_until = Instant::now() + Duration::from_secs(3);
+                            }
+                            // After the gesture is held, so GetRect during the
+                            // handler names this row. The host's own message is the
+                            // version-4 one these windows ignore.
+                            if supplement {
+                                if let Some(icon) = icon.as_ref() {
+                                    icon.post_legacy(right);
+                                }
                             }
                         }
-                        if !right {
+                        if !right && !keep {
                             *phase = Phase::Idle;
                             *cooldown_until = Instant::now() + COOLDOWN;
                         }

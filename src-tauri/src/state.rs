@@ -110,6 +110,11 @@ pub enum Request {
     Click {
         index: usize,
         right: bool,
+        /// Second click of a double-click. Posts `WM_LBUTTONDBLCLK` and closes.
+        double_click: bool,
+        /// First click of a possible double-click. The message goes out, the
+        /// list stays up until the double-click time passes.
+        keep: bool,
         anchor: crate::win::host::ScreenRect,
     },
     /// Hover entered or left the row. The panel stays open.

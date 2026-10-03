@@ -70,6 +70,9 @@ struct Reply {
     flyout_visible: bool,
     /// This host posts classic callbacks when `NIM_SETVERSION` was never seen.
     unknown_is_classic: bool,
+    /// This host posts `WM_LBUTTONDBLCLK` for `"double"`. Older builds treat
+    /// every non-right button as a single left click.
+    posts_double: bool,
     icons: Vec<IconRecord>,
 }
 
@@ -134,7 +137,13 @@ fn handle(request: Request) -> Reply {
         }
         Request::Activate { key, button, anchor } => {
             if let Some(record) = state::get(&key) {
-                let kind = if button == "right" { "right" } else { "left" };
+                let kind = if button == "right" {
+                    "right"
+                } else if button == "double" {
+                    "double"
+                } else {
+                    "left"
+                };
                 tray::deliver(&record, kind, anchor.into());
             }
             reply(true, false, false)
@@ -161,6 +170,7 @@ fn reply(ok: bool, full: bool, take_open: bool) -> Reply {
         },
         flyout_visible: tray::flyout_visible(),
         unknown_is_classic: true,
+        posts_double: true,
         icons,
     }
 }

@@ -539,6 +539,7 @@ pub mod events {
     pub const WM_CONTEXTMENU: u32 = 0x007B;
     pub const WM_LBUTTONDOWN: u32 = 0x0201;
     pub const WM_LBUTTONUP: u32 = 0x0202;
+    pub const WM_LBUTTONDBLCLK: u32 = 0x0203;
     pub const WM_RBUTTONUP: u32 = 0x0205;
     pub const WM_MOUSEMOVE: u32 = 0x0200;
 }
@@ -557,6 +558,12 @@ pub fn deliver(record: &IconRecord, kind: &str, anchor: Anchor) {
     let point = anchor_point(anchor);
     let version = callback_version(record);
     hold_gesture(&record.key, anchor);
+    // The double-click alone. A button-up or `NIN_SELECT` beside it is the
+    // single-click action (Steam opens its menu from that).
+    if kind == "double" {
+        notify(record, events::WM_LBUTTONDBLCLK, point);
+        return;
+    }
     if version >= parse::VERSION_4 {
         let event = match kind {
             "enter" => events::NIN_POPUPOPEN,

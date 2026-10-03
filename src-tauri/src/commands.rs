@@ -53,6 +53,10 @@ pub fn activate(
     let sent = state.shared.send(Request::Click {
         index,
         right: button == "right",
+        double_click: button == "double",
+        // The first half of a mouse double-click. Keyboard Enter stays "left"
+        // and closes immediately.
+        keep: button == "arm",
         anchor: row_on_screen(&app, row),
     });
     if !sent {
@@ -81,6 +85,12 @@ pub fn hover(
         return Err(Fault::new("worker_down"));
     }
     Ok(())
+}
+
+/// `GetDoubleClickTime`, so a second click still counts as a double-click.
+#[tauri::command]
+pub fn double_click_time() -> u32 {
+    unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() }.clamp(100, 2_000)
 }
 
 /// `SPI_GETMOUSEHOVERTIME`, so a row waits as long as the rest of the desktop.

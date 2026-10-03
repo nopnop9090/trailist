@@ -13,6 +13,7 @@ pub mod focus;
 pub mod forward;
 pub mod glyph;
 pub mod host;
+pub mod instance;
 pub mod island;
 pub mod launch;
 pub mod registry;

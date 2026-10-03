@@ -54,6 +54,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::activate,
             commands::hover,
+            commands::double_click_time,
             commands::hover_time,
             commands::about,
             commands::dismiss,
@@ -73,6 +74,12 @@ pub fn run() {
             let handle = app.handle().clone();
             shared.attach(sender);
 
+            // One running copy. A second launch asks this one to show the list
+            // and then leaves, before a second tray icon is created.
+            if !win::instance::claim(handle.clone()) {
+                handle.exit(0);
+                return Ok(());
+            }
             build_tray(&handle)?;
             register_hotkey(&handle, &watcher_store);
             watcher::spawn(handle, watcher_shared, receiver);

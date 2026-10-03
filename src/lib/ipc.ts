@@ -96,10 +96,10 @@ export interface Prefs {
   lang: LangPref;
 }
 
-export type MouseButton = "left" | "right";
+export type MouseButton = "left" | "right" | "double";
 
 export const api = {
-  /** Activates an icon. Left opens it, right opens its menu. */
+  /** Activates an icon. `double` is a double-click; `left` is a finished single click. */
   activate: (index: number, button: MouseButton, row: RowBox) =>
     invoke<void>("activate", { index, button, row }),
   /** Pointer entered or left a row. The panel stays open. */
@@ -107,6 +107,8 @@ export const api = {
     invoke<void>("hover", { index, enter, row }),
   /** How long the shell waits before a hover counts, in milliseconds. */
   hoverTime: () => invoke<number>("hover_time"),
+  /** How long two clicks still count as a double-click, in milliseconds. */
+  doubleClickTime: () => invoke<number>("double_click_time"),
   dismiss: () => invoke<void>("dismiss"),
   /** The language Windows' own interface is in, as `de` or `en`. */
   systemLang: () => invoke<string>("system_lang"),

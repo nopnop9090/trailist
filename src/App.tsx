@@ -76,6 +76,12 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const hoverDelay = useRef(400);
+  const doubleClickMs = useRef(500);
+  // The first click is not delivered yet. A second click on the same row
+  // before this timer fires is the double-click; the timer itself is the
+  // single click. Sending the single click immediately is what opens Steam's
+  // menu and eats the second click.
+  const pendingClick = useRef<{ index: number; timer: number } | null>(null);
   const hoverTimer = useRef<number | null>(null);
   const hoveredIndex = useRef<number | null>(null);
   // A click hides the row under the pointer, which would otherwise look like
@@ -177,6 +183,11 @@ export default function App() {
       if (millis > 0) {
         hoverDelay.current = millis;
       }
+    });
+    void api.doubleClickTime().then((millis) => {
+      if (millis > 0) {
+        doubleClickMs.current = millis;
+      }
     }).catch(() => undefined);
   }, []);
 
@@ -187,7 +198,7 @@ export default function App() {
     }
   };
 
-  const activate = useCallback(async (item: TrayItem, button: "left" | "right", element?: HTMLElement) => {
+  const activate = useCallback(async (item: TrayItem, button: "left" | "right" | "double", element?: HTMLElement) => {
     setBusy(item.index);
     suppressLeave.current = true;
     clearHoverTimer();
@@ -204,6 +215,29 @@ export default function App() {
       }
     }
   }, []);
+
+  const clearPendingClick = useCallback(() => {
+    if (pendingClick.current) {
+      window.clearTimeout(pendingClick.current.timer);
+      pendingClick.current = null;
+    }
+  }, []);
+
+  // Holds the click for the system double-click time. The row stays up, and
+  // nothing is posted until a second click arrives or the time runs out.
+  const queueClick = useCallback((item: TrayItem, element: HTMLElement) => {
+    if (pendingClick.current?.index === item.index) {
+      clearPendingClick();
+      void activate(item, "double", element);
+      return;
+    }
+    clearPendingClick();
+    const timer = window.setTimeout(() => {
+      pendingClick.current = null;
+      void activate(item, "left", element);
+    }, doubleClickMs.current);
+    pendingClick.current = { index: item.index, timer };
+  }, [activate, clearPendingClick]);
 
   const hoverRow = useCallback((item: TrayItem, element: HTMLElement) => {
     clearHoverTimer();
@@ -280,10 +314,6 @@ export default function App() {
         return;
       }
       switch (event.key) {
-        case "Escape":
-          event.preventDefault();
-          void api.dismiss();
-          break;
         case "ArrowDown":
           event.preventDefault();
           setCursor((current) => Math.min(current + 1, visible.length - 1));
@@ -292,8 +322,14 @@ export default function App() {
           event.preventDefault();
           setCursor((current) => Math.max(current - 1, 0));
           break;
+        case "Escape":
+          event.preventDefault();
+          clearPendingClick();
+          void api.dismiss();
+          break;
         case "Enter": {
           event.preventDefault();
+          clearPendingClick();
           const item = visible[cursor];
           if (item) {
             const row = listRef.current?.querySelector<HTMLElement>(`[data-row="${cursor}"]`);
@@ -315,7 +351,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [visible, cursor, activate, togglePin, settingsOpen]);
+  }, [visible, cursor, activate, clearPendingClick, togglePin, settingsOpen]);
 
   const showFallback = !list.direct && list.items.length > 0;
 
@@ -412,7 +448,14 @@ export default function App() {
                 hoverRow(item, element);
               }}
               onLeave={(element) => leaveRow(item, element)}
-              onActivate={(button, element) => void activate(item, button, element)}
+              onActivate={(button, element) => {
+                if (button === "right") {
+                  clearPendingClick();
+                  void activate(item, "right", element);
+                } else {
+                  queueClick(item, element);
+                }
+              }}
               onTogglePin={() => void togglePin(item)}
             />
           ))}
