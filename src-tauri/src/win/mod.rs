@@ -11,6 +11,7 @@ pub mod autostart;
 pub mod capture;
 pub mod focus;
 pub mod forward;
+pub mod host;
 pub mod island;
 pub mod launch;
 pub mod registry;

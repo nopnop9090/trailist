@@ -56,6 +56,20 @@ export interface TrayList {
    * and takes the keyboard.
    */
   opening: boolean;
+  /**
+   * The list came from the in-explorer host. When this is false, a click is only
+   * a best effort through the stock flyout.
+   */
+  direct: boolean;
+}
+
+/** A row in CSS pixels, with the webview's device-pixel ratio. */
+export interface RowBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  dpr: number;
 }
 
 /** What the panel says about itself: version, build stamp, shell build. */
@@ -85,9 +99,14 @@ export interface Prefs {
 export type MouseButton = "left" | "right";
 
 export const api = {
-  /** Replays a click on an icon. Left opens it, right opens its menu. */
-  activate: (index: number, button: MouseButton) =>
-    invoke<void>("activate", { index, button }),
+  /** Activates an icon. Left opens it, right opens its menu. */
+  activate: (index: number, button: MouseButton, row: RowBox) =>
+    invoke<void>("activate", { index, button, row }),
+  /** Pointer entered or left a row. The panel stays open. */
+  hover: (index: number, enter: boolean, row: RowBox) =>
+    invoke<void>("hover", { index, enter, row }),
+  /** How long the shell waits before a hover counts, in milliseconds. */
+  hoverTime: () => invoke<number>("hover_time"),
   dismiss: () => invoke<void>("dismiss"),
   /** The language Windows' own interface is in, as `de` or `en`. */
   systemLang: () => invoke<string>("system_lang"),

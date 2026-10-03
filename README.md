@@ -3,23 +3,24 @@
 Shows the hidden Windows tray icons as a **scrollable list with names** instead
 of an icon grid you have to recognise by sight.
 
-Click the tray chevron as you always have. TrayList reads the flyout that
-Windows just opened, puts it away, and shows its own panel in the same corner:
-one row per icon, icon on the left, name and current state on the right, and a
-filter box for when there are forty of them.
+Click the tray chevron as you always have. TrayList already knows the icons
+from their registrations, keeps the Windows grid from opening, and shows its
+own panel in that corner: one row per icon, icon on the left, name and current
+state on the right, and a filter box for when there are forty of them.
 
 *English · [Deutsch](README.de.md)*
 
 ```
   ▸ you click ^ in the tray
-  ▸ TrayList reads the icons and their tooltips, and grabs their bitmaps
-  ▸ the Windows grid is hidden and the list appears where it was
-  ▸ click a row  -> the app's own menu opens, exactly as before
+  ▸ the Windows grid stays hidden
+  ▸ the list opens from the registrations Explorer already holds
+  ▸ click or hover a row -> that app gets the same message the shell would send
   ▸ Esc / click away / the chevron again -> the list goes away
 ```
 
 Built as a [Tauri v2](https://tauri.app) app: a Rust core that talks to the shell
-and a React panel for the list. No injection, no shell hooks, no elevation.
+and a React panel for the list. A small DLL inside Explorer forwards hover and
+clicks to the icon that registered them. No elevation.
 
 ![The list: one row per hidden icon, with names, states and a filter box](docs/screenshot-list-en.png)
 
@@ -29,8 +30,8 @@ and a React panel for the list. No injection, no shell hooks, no elevation.
 |---|---|
 | **What** | The Windows 11 tray overflow, as a named and filterable list instead of a grid of 16x16 glyphs. |
 | **Who** | Written for one very full tray, with an AI assistant doing the typing — which is what the badge at the bottom is about. |
-| **When** | Version `0.3.0`. The build stamp is baked in at compile time and shown in the panel's footer, in the settings dialog, and to `trailist-probe theme`. |
-| **How** | A Rust core reads the shell's own flyout through UI Automation and takes its place; a React panel draws the list. Settings live in `config/settings.json` next to the exe. |
+| **When** | Version `0.4.0`. The build stamp is baked in at compile time and shown in the panel's footer, in the settings dialog, and to `trailist-probe theme`. |
+| **How** | A small DLL inside Explorer records each `Shell_NotifyIcon` registration and forwards hover and clicks to that window. A React panel draws the list. If the DLL cannot attach, the previous UI Automation path remains and the panel says so. Settings live in `config/settings.json` next to the exe. |
 
 The settings dialog, including where the badge and the version live:
 
@@ -150,70 +151,57 @@ Windows looks and where Task Manager's startup tab can switch it off again.
 ## How it works
 
 ```
-watcher thread (owns UI Automation and every shell interaction)
+watcher thread
   |
-  |- island.rs   find the flyout window     TopLevelWindowForOverflowXamlIsland
-  |- uia.rs      read the icons             Buttons with AutomationId=NotifyItemIcon,
-  |                                         whose Name is the full tooltip
-  |- capture.rs  render the bitmaps         PrintWindow(PW_RENDERFULLCONTENT) of the
-  |                                         flyout, then key its background out
-  |- suppress    ShowWindow(island, SW_HIDE)  the grid goes away, explorer state intact
-  |- overlay     our panel, sized to the flyout's own rectangle
-  |- forward.rs  replay a click             SW_SHOWNOACTIVATE, SendInput, SW_HIDE again
+  |- host.rs     load trailist_host.dll into explorer and talk over a pipe
+  |              the DLL subclasses Shell_TrayWnd, records NIM_ADD / MODIFY /
+  |              DELETE / SETVERSION, and copies the live icon
+  |- swallow     while the pipe is connected, the overflow flyout is not shown
+  |- overlay     the panel, anchored on the chevron
+  |- click       post the callback that icon registered, version 0 or version 4
+  |
+  '- fallback, only when the DLL did not attach
+       uia.rs + forward.rs    read the flyout, hide it, replay the click
 ```
 
-The classic Windows 10 route into the tray -- a `ToolbarWindow32` inside
-`TrayNotifyWnd`, read with `TB_GETBUTTON` and `TRAYDATA` -- is gone. On Windows 11
-the notification area is a XAML island, and on recent Windows 11 builds even the
-`SystemTray` implementation classes have moved out of `Taskbar.View.dll`. UI
-Automation is the interface that survived, and the icons' tooltips come with it.
+Apps keep registering with Explorer. The DLL watches that path and forwards
+pointer events back to the same window, identified by GUID or by window and id.
+It does not replace the taskbar, the clock, or the icons that are pinned in the
+visible strip.
 
-Details worth knowing, because they are what makes this feel native:
+On this machine the registration arrives as a 32-bit `NOTIFYICONDATA` inside
+`WM_COPYDATA` (`dwData == 1`, signature `0x34753423`). An icon that never called
+`NIM_SETVERSION` is version 0: `wParam` is the icon id and `lParam` is the mouse
+message, so a right-click is `WM_RBUTTONUP`. Version 4, only after
+`NIM_SETVERSION`, packs the point into `wParam` and the event into the low half
+of `lParam`. Sending the version-4 form to a version-0 window does nothing.
 
-- The flyout is hidden with `SW_HIDE` rather than told to close. Explorer keeps
-  its own state, so the next chevron click opens the flyout exactly as before
-  instead of landing on a half-closed window.
-- A replayed click briefly shows the flyout *without activating it*, so the click
-  lands on the icon rather than being absorbed by a focus change.
-- The bitmaps come from the shell first: `HKCU\Control Panel\NotifyIconSettings`
-  stores a PNG snapshot of each icon together with its first tooltip, and rows are
-  matched to those by tooltip so the icon is the real one, alpha and all. Only
-  icons without a snapshot are cut out of a `PrintWindow(PW_RENDERFULLCONTENT)`
-  rendering of the flyout, keyed against its background.
-- Nothing is trusted about where an icon *is* except the drawing itself. UI
-  Automation reports rectangles that can still be moving while the flyout
-  animates — a rectangle half a cell off crops a square of background with the
-  icon pushed to the bottom of it. So the grid of cells is measured from the
-  rendering: project "not the background colour" onto both axes and cut the
-  result into evenly spaced bands. That is also what makes the list order come
-  from the shell's own listing rather than from those wobbling rectangles.
-- The panel takes the foreground with `SetForegroundWindow`, twice: Windows often
-  refuses the first call when the click that opened the panel went to the taskbar,
-  and an auto-hide taskbar sliding away can hand the foreground back again.
+The name is the live tooltip. When that string is empty, the row uses
+`InitialTooltip` from `HKCU\Control Panel\NotifyIconSettings`. A registration
+whose window has already gone is dropped; Explorer does the same when a process
+is killed without `NIM_DELETE`, and the mirror used to keep those rows.
+
+The previous path is still in the tree. UI Automation reads
+`TopLevelWindowForOverflowXamlIsland` and `forward.rs` replays a click with
+`SendInput`. The panel labels that list as a best effort. The Windows 10
+`ToolbarWindow32` route is not implemented.
 
 ## Known trade-offs
 
-- **The native grid is on screen for about 60 ms.** UI Automation only sees the
-  icons while their window is on screen, so the handover cannot start before the
-  shell opens the flyout. Everything after that is hidden: the flyout is moved off
-  screen the moment it is found, and read and rendered while it is parked there.
-  Total time from the click to the list is about half a second, most of which is
-  waiting for the shell to finish laying the icons out.
-- **A click needs the flyout back for about 300 ms.** The shell only routes an
-  icon's click while that icon is on screen, so a replayed click briefly puts the
-  flyout back underneath. The panel is hidden first, which is why the app's own
-  menu appears without our window swallowing the click.
-- **Icons are the shell's own, so a brand-new one may not have one yet.** Windows
-  keeps a PNG snapshot of every tray icon under
-  `HKCU\Control Panel\NotifyIconSettings`; an icon the shell has not stored yet
-  falls back to a cell cut out of a rendering of the flyout, keyed against that
-  flyout's background.
-- **Hover tooltips are not replayed.** Moving the pointer over a row does not
-  make the owning app show its hover text, because that is not a click.
+- **With the host attached, the stock overflow does not stay on screen.** The
+  chevron opens this list. Hover on a row is posted to that app, and a click names
+  the registration (`GUID` or window and id) instead of a pixel in the flyout.
+- **If the host cannot attach, the old flyout path is the fallback.** That list is
+  labelled as a best effort: the grid can flash, a click briefly shows the flyout,
+  and hover is not delivered. A click there is allowed to miss.
+- **Icons come from the live registration when the host has copied one.** A row
+  whose icon has not arrived yet still uses the PNG snapshot under
+  `HKCU\Control Panel\NotifyIconSettings`.
 - **The tooltip is the name.** Applications decide what goes in it, so a few rows
-  read as a status rather than a name. Where an application writes its own name
-  twice — `TrayMaster TrayMaster - 3/3 running` — the repeat is removed, because
-  only the repeat is wrong there.
+  read as a status rather than a name. An empty tooltip falls back to the shell's
+  `InitialTooltip`. Where an application writes its own name twice —
+  `TrayMaster TrayMaster - 3/3 running` — the repeat is removed, because only the
+  repeat is wrong there.
 - **No foreground, no keyboard.** The panel appears because you clicked the
   *taskbar*, so Windows may refuse to hand us the foreground. TrayList insists
   twice; if that ever fails, the list still works with the mouse.
@@ -233,23 +221,25 @@ Details worth knowing, because they are what makes this feel native:
 src/                     React panel (the list and the settings dialog)
 src/lib/i18n.ts          the panel's German and English strings
 src-tauri/src/
-  watcher.rs             the state machine: detect, read, hide, show, dismiss
+  watcher.rs             the state machine: host list, or the flyout fallback
   overlay.rs             panel geometry and placement
   commands.rs            IPC surface
   settings.rs            config/settings.json
   types.rs               what crosses the bridge, and how a tooltip becomes a row
   i18n.rs                the language setting, and the tray menu's own strings
   version.rs             the version label the panel shows
+  win/host.rs            loads trailist_host.dll and talks to it
+  win/forward.rs         replaying clicks, only when the host is not attached
+  win/uia.rs             reading the flyout on that fallback
   win/island.rs          the overflow flyout window
-  win/uia.rs             reading the icons
   win/capture.rs         icon bitmaps
-  win/forward.rs         replaying clicks
   win/registry.rs        NotifyIconSettings, IsPromoted
   win/theme.rs           which colour scheme the shell is drawing in
   win/autostart.rs       the per-user Run entry
   win/launch.rs          opening a link in the browser
   win/focus.rs           taking the foreground
   bin/probe.rs           console front end for testing
+src-tauri/host/          the DLL Explorer loads; it mirrors Shell_NotifyIcon
 src-tauri/build.rs       stamps the build with the compiler host's local time
 public/badges/           the not-by-humans badge, one per panel theme
 scripts/build.ps1        release build
@@ -265,16 +255,20 @@ docs/screenshot-*.png    the pictures above, one pair per language
 cargo test --manifest-path .\src-tauri\Cargo.toml
 ```
 
-Three tests. The first is on the piece with real guesswork in it: turning the
-tooltips this machine's tray actually produces into a name and a state. Every
-case in it came off a real tray, including the awkward ones — the name repeated
-on one line, the name repeated across two, a name that merely shares a word, and
-a tooltip that is nothing but the name twice.
+Three tests in the app crate. The first is on the piece with real guesswork in
+it: turning the tooltips this machine's tray actually produces into a name and a
+state. Every case in it came off a real tray, including the awkward ones — the
+name repeated on one line, the name repeated across two, a name that merely
+shares a word, and a tooltip that is nothing but the name twice.
 
 Two more cover the language setting: that the setting wins over the system's
 language, and that every language has a complete tray menu. The frontend's own
 strings are checked by the compiler rather than by a test — the tables are one
 object each, so `tsc` is what catches a key that no longer exists.
+
+The host crate checks the 32-bit `NOTIFYICONDATA` layout this build actually
+sends, including a `Shell_NotifyIconGetRect` request. Run it with
+`cargo test --manifest-path .\src-tauri\host\Cargo.toml`.
 
 ## Credit
 

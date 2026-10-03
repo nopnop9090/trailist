@@ -25,6 +25,8 @@ pub struct Shared {
     /// Whether our panel is on screen. The watcher treats a flyout that appears
     /// while this is set as "the user wants the normal tray back".
     visible: AtomicBool,
+    /// The open list came from the host, so clicks name a registration.
+    direct: AtomicBool,
     requests: Mutex<Option<Sender<Request>>>,
 }
 
@@ -60,6 +62,14 @@ impl Shared {
         self.visible.load(Ordering::SeqCst)
     }
 
+    pub fn set_direct(&self, value: bool) {
+        self.direct.store(value, Ordering::SeqCst);
+    }
+
+    pub fn direct(&self) -> bool {
+        self.direct.load(Ordering::SeqCst)
+    }
+
     /// Handed to the watcher once at startup; every later request goes through
     /// this channel so the shell is only ever touched from that one thread.
     pub fn attach(&self, sender: Sender<Request>) {
@@ -80,10 +90,20 @@ impl Shared {
 /// allowed to block.
 #[derive(Debug, Clone, Copy)]
 pub enum Request {
-    /// Show or hide the list without touching the chevron.
+    /// Show or hide the list. With the host attached this does not touch the chevron.
     Toggle,
-    /// Replay a click on an icon, by its screen coordinates.
-    Click { x: i32, y: i32, right: bool },
+    /// Activate the icon at `index`. `anchor` is the row, in screen pixels.
+    Click {
+        index: usize,
+        right: bool,
+        anchor: crate::win::host::ScreenRect,
+    },
+    /// Hover entered or left the row. The panel stays open.
+    Hover {
+        index: usize,
+        enter: bool,
+        anchor: crate::win::host::ScreenRect,
+    },
 }
 
 /// Everything Tauri manages for us.

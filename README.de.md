@@ -6,22 +6,23 @@ englischsprachige Fassung steht in [README.md](README.md).
 
 *[English](README.md) · Deutsch*
 
-Klick auf den Pfeil in der Taskleiste, wie immer. TrayList liest das Flyout, das
-Windows gerade geöffnet hat, legt es weg und zeigt an dessen Stelle ein eigenes
-Panel: eine Zeile pro Symbol, links das Piktogramm, rechts Name und aktueller
-Zustand, dazu ein Filterfeld für den Fall, dass es vierzig sind.
+Klick auf den Pfeil in der Taskleiste, wie immer. TrayList kennt die Symbole
+bereits aus ihrer Registrierung, hält das Windows-Raster zu und zeigt an dieser
+Stelle ein eigenes Panel: eine Zeile pro Symbol, links das Piktogramm, rechts
+Name und aktueller Zustand, dazu ein Filterfeld für den Fall, dass es vierzig sind.
 
 ```
   ▸ du klickst ^ im Tray
-  ▸ TrayList liest die Symbole und ihre Tooltips und holt sich deren Bitmaps
-  ▸ das Windows-Raster verschwindet, die Liste erscheint an seiner Stelle
-  ▸ Klick auf eine Zeile  -> das eigene Menü der App öffnet sich, genau wie vorher
+  ▸ das Windows-Raster bleibt zu
+  ▸ die Liste kommt aus den Registrierungen, die Explorer schon hat
+  ▸ Klick oder Hover auf eine Zeile -> die App bekommt dieselbe Nachricht wie von der Shell
   ▸ Esc / danebenklicken / nochmal der Pfeil -> die Liste geht weg
 ```
 
 Gebaut als [Tauri v2](https://tauri.app)-App: ein Rust-Kern, der mit der Shell
-spricht, und ein React-Panel für die Liste. Keine Injektion, keine Shell-Hooks,
-keine Erhöhung der Rechte.
+spricht, und ein React-Panel für die Liste. Eine kleine DLL in Explorer leitet
+Hover und Klicks an das Symbol weiter, das sich registriert hat. Keine Erhöhung
+der Rechte.
 
 ![Die Liste: eine Zeile pro verstecktem Symbol, mit Namen, Zuständen und Filterfeld](docs/screenshot-list.png)
 
@@ -31,8 +32,8 @@ keine Erhöhung der Rechte.
 |---|---|
 | **Was** | Der Windows-11-Tray-Überlauf als benannte und filterbare Liste statt als Raster aus 16×16-Piktogrammen. |
 | **Wer** | Geschrieben für einen sehr vollen Tray, mit einem KI-Assistenten als Tippkraft — darum geht es beim Badge unten. |
-| **Wann** | Version `0.3.0`. Der Build-Stempel wird beim Kompilieren eingebacken und im Footer des Panels, im Einstellungsdialog und für `trailist-probe theme` angezeigt. |
-| **Wie** | Ein Rust-Kern liest das Flyout der Shell über UI Automation und nimmt dessen Platz ein; ein React-Panel zeichnet die Liste. Die Einstellungen liegen in `config/settings.json` neben der Exe. |
+| **Wann** | Version `0.4.0`. Der Build-Stempel wird beim Kompilieren eingebacken und im Footer des Panels, im Einstellungsdialog und für `trailist-probe theme` angezeigt. |
+| **Wie** | Eine kleine DLL in Explorer merkt sich jede `Shell_NotifyIcon`-Registrierung und leitet Hover und Klicks an dieses Fenster weiter. Ein React-Panel zeichnet die Liste. Hängt sich die DLL nicht ein, bleibt der bisherige UI-Automation-Weg, und das Panel sagt das. Die Einstellungen liegen in `config/settings.json` neben der Exe. |
 
 Der Einstellungsdialog, samt Badge und Version:
 
@@ -154,74 +155,61 @@ nachsieht und wo der Autostart-Tab des Task-Managers ihn wieder abschalten kann.
 ## Wie es arbeitet
 
 ```
-watcher-Thread (besitzt UI Automation und jede Shell-Interaktion)
+watcher-Thread
   |
-  |- island.rs   Flyout-Fenster finden   TopLevelWindowForOverflowXamlIsland
-  |- uia.rs      Symbole lesen           Buttons mit AutomationId=NotifyItemIcon,
-  |                                      deren Name der vollständige Tooltip ist
-  |- capture.rs  Bitmaps rendern         PrintWindow(PW_RENDERFULLCONTENT) des
-  |                                      Flyouts, dann dessen Hintergrund auskeyen
-  |- suppress    ShowWindow(island, SW_HIDE)  das Raster geht weg, Explorer-Zustand bleibt
-  |- overlay     unser Panel, gesetzt auf das Rechteck des Flyouts selbst
-  |- forward.rs  einen Klick nachspielen SW_SHOWNOACTIVATE, SendInput, wieder SW_HIDE
+  |- host.rs     trailist_host.dll in Explorer laden und über eine Pipe sprechen
+  |              die DLL hängt sich an Shell_TrayWnd, merkt sich NIM_ADD / MODIFY /
+  |              DELETE / SETVERSION und kopiert das laufende Symbol
+  |- swallow     solange die Pipe verbunden ist, bleibt das Überlauf-Flyout zu
+  |- overlay     das Panel, verankert am Pfeil
+  |- Klick       die Callback-Nachricht schicken, die das Symbol registriert hat
+  |
+  '- Ausweich, nur wenn die DLL sich nicht eingehängt hat
+       uia.rs + forward.rs    Flyout lesen, verstecken, Klick nachspielen
 ```
 
-Der klassische Windows-10-Weg in den Tray — ein `ToolbarWindow32` in
-`TrayNotifyWnd`, gelesen mit `TB_GETBUTTON` und `TRAYDATA` — ist weg. Unter
-Windows 11 ist der Infobereich eine XAML-Insel, und in neueren Windows-11-Builds
-sind selbst die `SystemTray`-Implementierungsklassen aus `Taskbar.View.dll`
-verschwunden. UI Automation ist die Schnittstelle, die übrig blieb, und die
-Tooltips der Symbole kommen mit ihr.
+Anwendungen registrieren sich weiter bei Explorer. Die DLL beobachtet diesen
+Weg und schickt Zeigerereignisse an dasselbe Fenster zurück, erkannt an der GUID
+oder an Fenster und Id. Sie ersetzt nicht die Taskleiste, die Uhr oder die
+Symbole, die in der sichtbaren Leiste angeheftet sind.
 
-Details, die man kennen sollte, weil sie ausmachen, dass es sich nativ anfühlt:
+Auf diesem Rechner kommt die Registrierung als 32-Bit-`NOTIFYICONDATA` in
+`WM_COPYDATA` an (`dwData == 1`, Signatur `0x34753423`). Ein Symbol, das nie
+`NIM_SETVERSION` gerufen hat, ist Version 0: `wParam` ist die Symbol-Id und
+`lParam` die Mausnachricht, ein Rechtsklick also `WM_RBUTTONUP`. Version 4, erst
+nach `NIM_SETVERSION`, packt den Punkt in `wParam` und das Ereignis in die
+untere Hälfte von `lParam`. Die Version-4-Form an ein Version-0-Fenster schickt
+nichts aus.
 
-- Das Flyout wird mit `SW_HIDE` versteckt statt geschlossen. Explorer behält seinen
-  eigenen Zustand, sodass der nächste Klick auf den Pfeil das Flyout genau wie
-  vorher öffnet, statt auf einem halb geschlossenen Fenster zu landen.
-- Ein nachgespielter Klick zeigt das Flyout kurz, *ohne es zu aktivieren*, damit
-  der Klick auf dem Symbol landet und nicht von einem Fokuswechsel geschluckt wird.
-- Die Bitmaps kommen zuerst aus der Shell: `HKCU\Control Panel\NotifyIconSettings`
-  hält einen PNG-Schnappschuss jedes Symbols samt seinem ersten Tooltip, und Zeilen
-  werden darüber zugeordnet, sodass das Symbol das echte ist, mit Alpha und allem.
-  Nur Symbole ohne Schnappschuss werden aus einem
-  `PrintWindow(PW_RENDERFULLCONTENT)`-Rendering des Flyouts geschnitten und gegen
-  dessen Hintergrund gekeyt.
-- Wo ein Symbol *ist*, wird nur der Zeichnung geglaubt. UI Automation meldet
-  Rechtecke, die sich während der Flyout-Animation noch bewegen können — ein
-  Rechteck eine halbe Zelle daneben schneidet ein Quadrat Hintergrund aus, mit dem
-  Symbol unten hineingequetscht. Deshalb wird das Zellenraster aus dem Rendering
-  gemessen: „nicht die Hintergrundfarbe" auf beide Achsen projizieren und das
-  Ergebnis in gleichmäßige Bänder schneiden. Daher stammt auch die Reihenfolge der
-  Liste — aus der Aufzählung der Shell selbst, nicht aus den wackelnden Rechtecken.
-- Das Panel holt sich den Vordergrund mit `SetForegroundWindow`, zweimal: Windows
-  lehnt den ersten Aufruf oft ab, wenn der Klick, der das Panel öffnete, an die
-  Taskleiste ging, und eine wegkippende Auto-Hide-Taskleiste kann den Vordergrund
-  wieder zurückgeben.
+Der Name ist der laufende Tooltip. Ist der leer, nimmt die Zeile
+`InitialTooltip` aus `HKCU\Control Panel\NotifyIconSettings`. Eine Registrierung,
+deren Fenster schon weg ist, fällt raus; Explorer macht dasselbe, wenn ein
+Prozess ohne `NIM_DELETE` endet, und die Spiegeltabelle hat diese Zeilen bisher
+behalten.
+
+Der bisherige Weg liegt noch im Baum. UI Automation liest
+`TopLevelWindowForOverflowXamlIsland`, und `forward.rs` spielt einen Klick mit
+`SendInput` nach. Das Panel kennzeichnet diese Liste als Notbehelf. Der
+Windows-10-Weg über `ToolbarWindow32` ist nicht umgesetzt.
 
 ## Bekannte Kompromisse
 
-- **Das native Raster steht rund 60 ms auf dem Bildschirm.** UI Automation sieht die
-  Symbole nur, solange deren Fenster sichtbar ist, die Übergabe kann also nicht
-  beginnen, bevor die Shell das Flyout öffnet. Alles danach ist versteckt: das
-  Flyout wird vom Bildschirm geschoben, sobald es gefunden ist, und dort gelesen und
-  gerendert. Vom Klick bis zur Liste dauert es etwa eine halbe Sekunde, davon das
-  meiste Warten darauf, dass die Shell die Symbole fertig angeordnet hat.
-- **Ein Klick braucht das Flyout für rund 300 ms zurück.** Die Shell leitet den
-  Klick auf ein Symbol nur weiter, solange das Symbol auf dem Bildschirm steht, also
-  legt ein nachgespielter Klick das Flyout kurz wieder darunter. Das Panel ist
-  vorher versteckt, weshalb das Menü der App erscheint, ohne dass unser Fenster den
-  Klick schluckt.
-- **Die Symbole sind die der Shell, ein brandneues hat also vielleicht noch keins.**
-  Windows hält unter `HKCU\Control Panel\NotifyIconSettings` einen Schnappschuss
-  jedes Tray-Symbols; ein Symbol, das die Shell noch nicht gespeichert hat, fällt
-  auf eine Zelle aus einem Rendering des Flyouts zurück, gegen dessen Hintergrund
-  gekeyt.
-- **Hover-Tooltips werden nicht nachgespielt.** Die Maus über eine Zeile zu bewegen,
-  lässt die besitzende App ihren Hover-Text nicht zeigen, weil das kein Klick ist.
+- **Mit verbundenem Host bleibt das Windows-Flyout nicht auf dem Bildschirm.** Der
+  Pfeil öffnet diese Liste. Hover über eine Zeile geht an die zugehörige App, und
+  ein Klick nennt die Registrierung (GUID oder Fenster und Id) statt eines Pixels
+  im Flyout.
+- **Kann der Host sich nicht einhängen, bleibt der alte Flyout-Weg als Ausweich.**
+  Die Liste ist dann als Notbehelf gekennzeichnet: das Raster kann aufblitzen, ein
+  Klick zeigt das Flyout kurz, und Hover kommt nicht an. Ein Klick darf dort daneben
+  gehen.
+- **Die Symbole kommen aus der laufenden Registrierung, sobald der Host eines
+  kopiert hat.** Eine Zeile, deren Symbol noch fehlt, nutzt weiter den PNG-Schnappschuss
+  unter `HKCU\Control Panel\NotifyIconSettings`.
 - **Der Tooltip ist der Name.** Was darin steht, entscheiden die Anwendungen, also
-  lesen sich ein paar Zeilen wie ein Status statt wie ein Name. Wo eine Anwendung
-  ihren eigenen Namen zweimal schreibt — `TrayMaster TrayMaster - 3/3 running` —
-  wird die Wiederholung entfernt, weil nur die Wiederholung dort falsch ist.
+  lesen sich ein paar Zeilen wie ein Status statt wie ein Name. Ein leerer Tooltip
+  fällt auf `InitialTooltip` der Shell zurück. Wo eine Anwendung ihren eigenen
+  Namen zweimal schreibt — `TrayMaster TrayMaster - 3/3 running` — wird die
+  Wiederholung entfernt, weil nur die Wiederholung dort falsch ist.
 - **Kein Vordergrund, keine Tastatur.** Das Panel erscheint, weil du auf die
   *Taskleiste* geklickt hast, also darf Windows uns den Vordergrund verweigern.
   TrayList besteht zweimal darauf; scheitert das, funktioniert die Liste weiterhin
@@ -240,23 +228,25 @@ Details, die man kennen sollte, weil sie ausmachen, dass es sich nativ anfühlt:
 src/                     React-Panel (die Liste und der Einstellungsdialog)
 src/lib/i18n.ts          die deutschen und englischen Texte des Panels
 src-tauri/src/
-  watcher.rs             die Zustandsmaschine: erkennen, lesen, verstecken, zeigen, schließen
+  watcher.rs             die Zustandsmaschine: Host-Liste, oder der Flyout-Ausweich
   overlay.rs             Geometrie und Platzierung des Panels
   commands.rs            die IPC-Oberfläche
   settings.rs            config/settings.json
   types.rs               was über die Brücke geht, und wie aus einem Tooltip eine Zeile wird
   i18n.rs                Sprachauswahl und die Texte des Tray-Menüs
   version.rs             die Versionszeile, die das Panel zeigt
+  win/host.rs            lädt trailist_host.dll und spricht mit ihr
+  win/forward.rs         Klicks nachspielen, nur wenn der Host nicht hängt
+  win/uia.rs             das Flyout auf diesem Ausweich lesen
   win/island.rs          das Überlauf-Flyout-Fenster
-  win/uia.rs             die Symbole lesen
   win/capture.rs         die Symbol-Bitmaps
-  win/forward.rs         Klicks nachspielen
   win/registry.rs        NotifyIconSettings, IsPromoted
   win/theme.rs           welches Farbschema die Shell zeichnet
   win/autostart.rs       der Run-Eintrag des Benutzers
   win/launch.rs          einen Link im Browser öffnen
   win/focus.rs           den Vordergrund holen
   bin/probe.rs           Konsolen-Oberfläche zum Testen
+src-tauri/host/          die DLL, die Explorer lädt; sie spiegelt Shell_NotifyIcon
 src-tauri/build.rs       stempelt den Build mit der lokalen Zeit des Compiler-Rechners
 public/badges/           das not-by-humans-Badge, eines pro Panel-Theme
 scripts/build.ps1        Release-Build
@@ -272,13 +262,17 @@ docs/screenshot-*.png    die Bilder oben, ein Paar pro Sprache
 cargo test --manifest-path .\src-tauri\Cargo.toml
 ```
 
-Drei Tests. Einer gilt dem Stück mit echtem Raten: aus den Tooltips, die der Tray
-dieses Rechners tatsächlich produziert, einen Namen und einen Zustand zu machen.
-Jeder Fall darin kommt von einem echten Tray, auch die unangenehmen — der Name auf
-einer Zeile wiederholt, über zwei Zeilen wiederholt, ein Name, der nur ein Wort
-teilt, und ein Tooltip, der nichts als der zweimalige Name ist. Die beiden anderen
-prüfen die Sprachauswahl: dass eine Einstellung vor der Systemsprache gilt und dass
-jede Sprache ein vollständiges Tray-Menü hat.
+Drei Tests im App-Crate. Einer gilt dem Stück mit echtem Raten: aus den Tooltips,
+die der Tray dieses Rechners tatsächlich produziert, einen Namen und einen Zustand
+zu machen. Jeder Fall darin kommt von einem echten Tray, auch die unangenehmen —
+der Name auf einer Zeile wiederholt, über zwei Zeilen wiederholt, ein Name, der nur
+ein Wort teilt, und ein Tooltip, der nichts als der zweimalige Name ist. Die beiden
+anderen prüfen die Sprachauswahl: dass eine Einstellung vor der Systemsprache gilt
+und dass jede Sprache ein vollständiges Tray-Menü hat.
+
+Das Host-Crate prüft das 32-Bit-`NOTIFYICONDATA`-Layout, das dieser Build wirklich
+schickt, einschließlich einer `Shell_NotifyIconGetRect`-Anfrage:
+`cargo test --manifest-path .\src-tauri\host\Cargo.toml`.
 
 ## Dank
 

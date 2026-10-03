@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 
-import { api, events, type About, type Prefs, type TrayItem, type TrayList } from "@/lib/ipc";
+import { api, events, type About, type Prefs, type RowBox, type TrayItem, type TrayList } from "@/lib/ipc";
 import {
   faultText,
   LANG_CHOICES,
@@ -19,7 +19,18 @@ import {
 } from "@/lib/i18n";
 import { cn, squeeze } from "@/lib/utils";
 
-const EMPTY: TrayList = { items: [], error: null, source: "", opening: false };
+const EMPTY: TrayList = { items: [], error: null, source: "", opening: false, direct: false };
+
+function rowBox(element: HTMLElement): RowBox {
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    dpr: window.devicePixelRatio || 1,
+  };
+}
 
 /** How long a settings change waits before it is written.
  *
@@ -64,6 +75,12 @@ export default function App() {
 
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const hoverDelay = useRef(400);
+  const hoverTimer = useRef<number | null>(null);
+  const hoveredIndex = useRef<number | null>(null);
+  // A click hides the row under the pointer, which would otherwise look like
+  // the pointer left and close the menu the click just opened.
+  const suppressLeave = useRef(false);
 
   const lang = resolveLang(prefs?.lang, systemLang);
   const t = useMemo(() => translator(lang), [lang]);
@@ -155,13 +172,55 @@ export default function App() {
     row?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
 
-  const activate = useCallback(async (item: TrayItem, button: "left" | "right") => {
+  useEffect(() => {
+    void api.hoverTime().then((millis) => {
+      if (millis > 0) {
+        hoverDelay.current = millis;
+      }
+    }).catch(() => undefined);
+  }, []);
+
+  const clearHoverTimer = () => {
+    if (hoverTimer.current != null) {
+      window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+  };
+
+  const activate = useCallback(async (item: TrayItem, button: "left" | "right", element?: HTMLElement) => {
     setBusy(item.index);
+    suppressLeave.current = true;
+    clearHoverTimer();
+    hoveredIndex.current = null;
+    const row = element ? rowBox(element) : { left: 0, top: 0, right: 32, bottom: 32, dpr: window.devicePixelRatio || 1 };
     try {
-      await api.activate(item.index, button);
+      await api.activate(item.index, button, row);
     } catch {
       setBusy(null);
     }
+  }, []);
+
+  const hoverRow = useCallback((item: TrayItem, element: HTMLElement) => {
+    clearHoverTimer();
+    const row = rowBox(element);
+    hoverTimer.current = window.setTimeout(() => {
+      hoveredIndex.current = item.index;
+      void api.hover(item.index, true, row).catch(() => undefined);
+    }, hoverDelay.current);
+  }, []);
+
+  const leaveRow = useCallback((item: TrayItem, element: HTMLElement) => {
+    clearHoverTimer();
+    if (suppressLeave.current) {
+      suppressLeave.current = false;
+      hoveredIndex.current = null;
+      return;
+    }
+    if (hoveredIndex.current !== item.index) {
+      return;
+    }
+    hoveredIndex.current = null;
+    void api.hover(item.index, false, rowBox(element)).catch(() => undefined);
   }, []);
 
   const togglePin = useCallback(async (item: TrayItem) => {
@@ -232,7 +291,8 @@ export default function App() {
           event.preventDefault();
           const item = visible[cursor];
           if (item) {
-            void activate(item, "left");
+            const row = listRef.current?.querySelector<HTMLElement>(`[data-row="${cursor}"]`);
+            void activate(item, "left", row ?? undefined);
           }
           break;
         }
@@ -251,6 +311,8 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, cursor, activate, togglePin, settingsOpen]);
+
+  const showFallback = !list.direct && list.items.length > 0;
 
   const total = list.items.length;
 
@@ -327,6 +389,10 @@ export default function App() {
           </div>
         ) : null}
 
+        {showFallback ? (
+          <p className="px-3 pb-1 text-[10.5px] leading-snug text-ink-faint">{t("list.fallback")}</p>
+        ) : null}
+
         <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
           {visible.map((item, position) => (
             <Row
@@ -336,8 +402,12 @@ export default function App() {
               highlighted={position === cursor}
               busy={busy === item.index}
               t={t}
-              onHover={() => setCursor(position)}
-              onActivate={(button) => void activate(item, button)}
+              onHover={(element) => {
+                setCursor(position);
+                hoverRow(item, element);
+              }}
+              onLeave={(element) => leaveRow(item, element)}
+              onActivate={(button, element) => void activate(item, button, element)}
               onTogglePin={() => void togglePin(item)}
             />
           ))}
@@ -405,6 +475,7 @@ function Row({
   busy,
   t,
   onHover,
+  onLeave,
   onActivate,
   onTogglePin,
 }: {
@@ -413,19 +484,21 @@ function Row({
   highlighted: boolean;
   busy: boolean;
   t: Translate;
-  onHover: () => void;
-  onActivate: (button: "left" | "right") => void;
+  onHover: (element: HTMLElement) => void;
+  onLeave: (element: HTMLElement) => void;
+  onActivate: (button: "left" | "right", element: HTMLElement) => void;
   onTogglePin: () => void;
 }) {
   return (
     <div
       data-row={position}
       title={item.tooltip}
-      onMouseEnter={onHover}
-      onClick={() => onActivate("left")}
+      onMouseEnter={(event) => onHover(event.currentTarget)}
+      onMouseLeave={(event) => onLeave(event.currentTarget)}
+      onClick={(event) => onActivate("left", event.currentTarget)}
       onContextMenu={(event) => {
         event.preventDefault();
-        onActivate("right");
+        onActivate("right", event.currentTarget);
       }}
       className={cn(
         "tl-row group flex cursor-default items-center gap-2.5 rounded-md px-2",

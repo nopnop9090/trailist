@@ -5,6 +5,7 @@ dist/
 
 # Rust / Tauri
 src-tauri/target/
+src-tauri/host/target/
 src-tauri/gen/
 
 # Local settings and logs: the settings file is per-machine.

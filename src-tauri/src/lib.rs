@@ -53,6 +53,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::activate,
+            commands::hover,
+            commands::hover_time,
             commands::about,
             commands::dismiss,
             commands::current,
@@ -220,6 +222,7 @@ impl EmitList for AppHandle {
                 // The same list, re-sent: nothing was read, and the panel must not
                 // treat it as an opening.
                 opening: false,
+                direct: self.try_state::<AppState>().map(|state| state.shared.direct()).unwrap_or(false),
             },
         )
     }

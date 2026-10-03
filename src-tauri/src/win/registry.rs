@@ -21,6 +21,8 @@ pub struct Entry {
     pub normalised: String,
     pub promoted: bool,
     pub snapshot: Option<Vec<u8>>,
+    /// `IconGuid`, when the shell recorded one.
+    pub guid: Option<String>,
 }
 
 /// Every icon the shell has ever recorded whose application is still installed.
@@ -56,6 +58,7 @@ pub fn entries() -> Vec<Entry> {
                     .get_raw_value("IconSnapshot")
                     .ok()
                     .map(|value| value.bytes.into_owned()),
+                guid: sub.get_value("IconGuid").ok(),
                 key,
             })
         })
@@ -69,6 +72,60 @@ pub fn entries() -> Vec<Entry> {
 /// `InitialTooltip` was captured the first time the icon appeared — so this is a
 /// prefix vote rather than an equality test. Entries are passed in because the
 /// hive is read once per flyout opening, not once per icon.
+/// Prefers the host's GUID, then the same tooltip prefix the flyout path uses.
+pub fn match_icon(entries: &[Entry], host_key: &str, tooltip: &str) -> Option<Entry> {
+    if let Some(guid) = host_key.strip_prefix("guid:") {
+        let wanted = normalise_guid(guid);
+        if let Some(found) = entries.iter().find(|entry| {
+            entry
+                .guid
+                .as_deref()
+                .is_some_and(|stored| normalise_guid(stored) == wanted)
+        }) {
+            return Some(found.clone());
+        }
+    }
+    best_match(entries, tooltip)
+}
+
+fn normalise_guid(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(|ch| ch == '{' || ch == '}')
+        .to_ascii_lowercase()
+}
+
+/// The registry row for this executable, when only one icon belongs to it.
+///
+/// Several icons from one program (PowerToys, for instance) share a path, and
+/// guessing which tooltip is whose would put the wrong name on the row.
+pub fn match_executable(entries: &[Entry], executable: &str) -> Option<Entry> {
+    let mut found = entries.iter().filter(|entry| {
+        entry
+            .executable
+            .as_deref()
+            .is_some_and(|stored| same_executable(stored, executable))
+    });
+    let first = found.next()?;
+    if found.next().is_some() {
+        return None;
+    }
+    Some(first.clone())
+}
+
+fn same_executable(stored: &str, actual: &str) -> bool {
+    let tail = stored
+        .trim()
+        .strip_prefix('{')
+        .and_then(|rest| rest.split_once('}'))
+        .map(|(_, path)| path.trim_start_matches(['\\', '/']))
+        .unwrap_or(stored);
+    if tail.len() < 5 {
+        return false;
+    }
+    actual.to_ascii_lowercase().ends_with(&tail.to_ascii_lowercase())
+}
+
 pub fn best_match(entries: &[Entry], tooltip: &str) -> Option<Entry> {
     let needle = normalise(tooltip);
     if needle.chars().count() < 3 {

@@ -3,13 +3,32 @@
 //! Nothing here touches the shell directly: clicks and the chevron are handed to
 //! the watcher thread, which is the only thread with UI Automation.
 
+use serde::Deserialize;
 use tauri::{AppHandle, State};
 
 use crate::overlay;
 use crate::state::{AppState, Request};
 use crate::types::{About, Fault, Prefs, TrayList};
-use crate::win::registry;
+use crate::win::{host, registry};
 use crate::EmitList;
+
+/// A row rectangle in CSS pixels, plus the webview's device-pixel ratio.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowBox {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub dpr: f64,
+}
+
+fn row_on_screen(app: &AppHandle, row: RowBox) -> host::ScreenRect {
+    let hwnd = overlay::window(app)
+        .and_then(|window| window.hwnd().ok())
+        .map(|handle| handle.0 as isize);
+    host::screen_rect(hwnd, row.left, row.top, row.right, row.bottom, row.dpr)
+}
 
 /// Replays a click on one of the listed icons.
 ///
@@ -20,24 +39,63 @@ use crate::EmitList;
 /// which makes the watcher move to idle and drop the click entirely.
 #[tauri::command]
 pub fn activate(
+    app: AppHandle,
     state: State<'_, AppState>,
     index: usize,
     button: String,
+    row: RowBox,
 ) -> Result<(), Fault> {
-    let item = state
+    let _ = state
         .shared
         .item_at(index)
         .ok_or_else(|| Fault::new("item_gone"))?;
 
     let sent = state.shared.send(Request::Click {
-        x: item.x,
-        y: item.y,
+        index,
         right: button == "right",
+        anchor: row_on_screen(&app, row),
     });
     if !sent {
         return Err(Fault::new("worker_down"));
     }
     Ok(())
+}
+
+/// Tells the owning app the pointer entered or left this row.
+///
+/// The panel stays up. Leaving cancels a hover the app already opened.
+#[tauri::command]
+pub fn hover(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    index: usize,
+    enter: bool,
+    row: RowBox,
+) -> Result<(), Fault> {
+    let sent = state.shared.send(Request::Hover {
+        index,
+        enter,
+        anchor: row_on_screen(&app, row),
+    });
+    if !sent {
+        return Err(Fault::new("worker_down"));
+    }
+    Ok(())
+}
+
+/// `SPI_GETMOUSEHOVERTIME`, so a row waits as long as the rest of the desktop.
+#[tauri::command]
+pub fn hover_time() -> u32 {
+    let mut millis = 400u32;
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
+            windows::Win32::UI::WindowsAndMessaging::SPI_GETMOUSEHOVERTIME,
+            0,
+            Some(&mut millis as *mut u32 as *mut _),
+            windows::Win32::UI::WindowsAndMessaging::SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+    }
+    millis.clamp(50, 2_000)
 }
 
 /// Puts the panel away without touching any icon.
@@ -56,6 +114,7 @@ pub fn current(state: State<'_, AppState>) -> TrayList {
         source: crate::watcher::shell_build(),
         // Nothing was read just now, so this is not an opening.
         opening: false,
+        direct: state.shared.direct(),
     }
 }
 
