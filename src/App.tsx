@@ -145,12 +145,16 @@ export default function App() {
       .about()
       .then(setAbout)
       .catch(() => setAbout(null));
+    const prefsEvents = events.onPrefs(setPrefs);
     // A window that was opened without a fresh read still has something to show.
     void api.current().then((payload) => {
       if (payload.items.length > 0) {
         setList(payload);
       }
     });
+    return () => {
+      void prefsEvents.then((off) => off());
+    };
   }, []);
 
   const visible = useMemo(() => {
@@ -683,6 +687,7 @@ function SettingsPanel({
   // `null` until the answer is in, which also disables the switch: a check box
   // that does not know its own state would be a guess.
   const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     void api
@@ -690,6 +695,17 @@ function SettingsPanel({
       .then(setAutostart)
       .catch(() => setAutostart(null));
   }, []);
+
+  const checkForUpdate = async () => {
+    setChecking(true);
+    try {
+      await api.checkUpdate();
+    } catch (error) {
+      console.warn("TrayList:", faultText(asFault(error), t));
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const toggleAutostart = async () => {
     if (autostart === null) {
@@ -753,6 +769,19 @@ function SettingsPanel({
                 disabled={autostart === null}
                 onChange={() => void toggleAutostart()}
               />
+              <Switch
+                label={t("settings.updateCheck")}
+                checked={prefs.updateCheck === true}
+                onChange={(value) => onChange({ updateCheck: value })}
+              />
+              <button
+                type="button"
+                disabled={checking}
+                onClick={() => void checkForUpdate()}
+                className="text-[11.5px] text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink disabled:opacity-50"
+              >
+                {checking ? t("settings.updateChecking") : t("settings.updateNow")}
+              </button>
               <Switch
                 label={t("settings.pinnedFirst")}
                 checked={prefs.pinnedFirst}

@@ -94,6 +94,11 @@ export interface Prefs {
   pinnedFirst: boolean;
   /** `de`, `en`, or `system` for whatever the shell is set to. */
   lang: LangPref;
+  /**
+   * Automatic update check. `null` until the first start has asked.
+   * `false` leaves it to the button in the settings.
+   */
+  updateCheck: boolean | null;
 }
 
 export type MouseButton = "left" | "right" | "double";
@@ -128,6 +133,8 @@ export const api = {
   setAutostart: (enabled: boolean) => invoke<boolean>("set_autostart", { enabled }),
   /** Version, build stamp and shell build. */
   about: () => invoke<About>("about"),
+  /** Looks up the newest release. A newer one asks before the browser opens. */
+  checkUpdate: () => invoke<void>("check_for_update"),
   /** Opens a link in the user's own browser. Only `https` is accepted. */
   openUrl: (url: string) => invoke<void>("open_url", { url }),
 };
@@ -144,4 +151,7 @@ export const events = {
    */
   onTheme: (handler: (dark: boolean) => void): Promise<UnlistenFn> =>
     listen<boolean>("tl:theme", (event) => handler(event.payload)),
+  /** The startup question wrote the preferences, so an open panel can follow. */
+  onPrefs: (handler: (prefs: Prefs) => void): Promise<UnlistenFn> =>
+    listen<Prefs>("tl:prefs", (event) => handler(event.payload)),
 };

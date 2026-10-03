@@ -150,7 +150,12 @@ pub fn dark_theme() -> bool {
 /// gap to the taskbar feel like live controls rather than settings that only count
 /// next time.
 #[tauri::command]
-pub fn set_prefs(app: AppHandle, state: State<'_, AppState>, prefs: Prefs) -> Result<Prefs, Fault> {
+pub fn set_prefs(app: AppHandle, state: State<'_, AppState>, mut prefs: Prefs) -> Result<Prefs, Fault> {
+    // A panel that loaded before the first-start question returned still has
+    // `null`. Writing that back would forget the answer.
+    if prefs.update_check.is_none() {
+        prefs.update_check = state.prefs().update_check;
+    }
     state
         .store
         .write(prefs.clone())
@@ -196,6 +201,12 @@ pub fn about() -> About {
         built: crate::version::built().to_string(),
         shell: crate::watcher::shell_build(),
     }
+}
+
+/// Looks up the newest GitHub release and, when one is newer, asks before opening it.
+#[tauri::command]
+pub fn check_for_update(app: AppHandle) {
+    crate::win::update::check_now(&app);
 }
 
 /// Opens a link in the user's own browser.

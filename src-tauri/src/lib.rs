@@ -57,6 +57,7 @@ pub fn run() {
             commands::double_click_time,
             commands::hover_time,
             commands::about,
+            commands::check_for_update,
             commands::dismiss,
             commands::current,
             commands::dark_theme,
@@ -81,6 +82,7 @@ pub fn run() {
                 return Ok(());
             }
             build_tray(&handle)?;
+            win::update::spawn(handle.clone());
             register_hotkey(&handle, &watcher_store);
             watcher::spawn(handle, watcher_shared, receiver);
             Ok(())

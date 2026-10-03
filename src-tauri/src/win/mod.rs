@@ -19,3 +19,4 @@ pub mod launch;
 pub mod registry;
 pub mod theme;
 pub mod uia;
+pub mod update;

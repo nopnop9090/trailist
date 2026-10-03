@@ -270,6 +270,11 @@ pub struct Prefs {
     /// Which language the panel speaks: `de`, `en`, or `system` for whatever the
     /// shell is set to. Anything unrecognised counts as `system`.
     pub lang: String,
+    /// Whether to look for a newer GitHub release on startup and once a day.
+    ///
+    /// Absent until the first start has asked. `false` leaves checking to the
+    /// button in the settings.
+    pub update_check: Option<bool>,
 }
 
 impl Prefs {
@@ -290,6 +295,7 @@ impl Default for Prefs {
             hotkey: Some(Self::DEFAULT_HOTKEY.to_string()),
             pinned_first: false,
             lang: "system".to_string(),
+            update_check: None,
         }
     }
 }
