@@ -857,7 +857,14 @@ function SettingsPanel({
         </Group>
       </div>
 
-      <div className="flex shrink-0 items-center justify-end border-t border-line px-2.5 py-2">
+      <div className="flex shrink-0 items-center justify-between border-t border-line px-2.5 py-2">
+        <button
+          type="button"
+          onClick={() => void api.quit()}
+          className="text-[11.5px] text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink"
+        >
+          {t("settings.quit")}
+        </button>
         <button
           type="button"
           onClick={onClose}

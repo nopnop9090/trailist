@@ -1,0 +1,13 @@
+---
+description: How to version and publish a TrayList release
+alwaysApply: true
+---
+
+# Releases
+
+When publishing a TrayList release:
+
+- Bump the version by at least one step on the last number (`0.5.3` becomes `0.5.4`) unless a different version was named.
+- Keep the release notes. After the new release is up, delete the files attached to every older release except the two newest. The newest release keeps its setup, exe and host DLL.
+- Version strings live in `package.json`, `package-lock.json` (the trailist entries only), `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (the `trailist` package only), `src-tauri/tauri.conf.json`, and the When/Wann lines in both READMEs.
+- Leave the installer's `0.4.0` explorer-restart threshold where it is.

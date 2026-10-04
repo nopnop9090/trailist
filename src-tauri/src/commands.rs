@@ -161,10 +161,6 @@ pub fn set_prefs(app: AppHandle, state: State<'_, AppState>, mut prefs: Prefs) -
         .write(prefs.clone())
         .map_err(|error| Fault::with("settings_write", error))?;
 
-    // The tray menu is drawn by Windows, not by us, so a language change has to be
-    // handed to the shell as a new menu rather than merely taken note of.
-    crate::retitle_tray(&app, &prefs);
-
     let mut items = state.shared.items();
     crate::watcher::apply_order(&mut items, &prefs);
     let _ = app.emit_list(items);
@@ -250,6 +246,12 @@ pub fn set_pinned(
     Ok(())
 }
 
+/// Leaves. The settings dialog is the only place that offers this.
+#[tauri::command]
+pub fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
 /// Opens the folder the settings file lives in.
 #[tauri::command]
 pub fn open_config(state: State<'_, AppState>) -> Result<(), Fault> {
@@ -261,8 +263,7 @@ pub fn open_config(state: State<'_, AppState>) -> Result<(), Fault> {
         .map_err(|error| Fault::with("open_config", error))
 }
 
-/// Opens or closes the list without touching the chevron. Used by the hotkey and
-/// the tray menu.
+/// Opens or closes the list without touching the chevron. Used by the hotkey.
 #[tauri::command]
 pub fn toggle(state: State<'_, AppState>) {
     state.shared.send(Request::Toggle);
@@ -271,8 +272,7 @@ pub fn toggle(state: State<'_, AppState>) {
 /// The language Windows' own interface is in, as `de` or `en`.
 ///
 /// Asked for once at startup, because a `system` setting has to be resolved by
-/// whoever shows the words: the panel needs it for its own text, and Rust needs it
-/// for the tray menu.
+/// the panel, which is what shows the words.
 #[tauri::command]
 pub fn system_lang() -> String {
     crate::i18n::Lang::resolve("system").tag().to_string()

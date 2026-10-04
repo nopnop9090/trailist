@@ -79,8 +79,9 @@ just are not shown anywhere at once. That is the whole problem this solves.
 - How much air to leave between the panel and the taskbar, from flush to 40 px
 - Start with Windows, via the per-user autostart entry Windows itself reads
 - Filter box on or off, always-visible icons first, alphabetical or tray order
-- Language: `system`, `de` or `en`. The panel, the tray menu and the error messages
-  all follow it; anything that is not German gets English rather than a mixture
+- Language: `system`, `de` or `en`. The panel and the error messages follow it;
+  anything that is not German gets English rather than a mixture
+- Quit, in the same dialog
 
 **Tray attributes**
 - Pin button per row, including icons that are already in the visible strip, so
@@ -166,8 +167,8 @@ quickest way to see what the shell actually reported.
 ## Settings
 
 `config/settings.json` next to the exe (or `%APPDATA%\TrayList` when that folder
-is read-only). The gear in the panel edits the same file; the tray menu opens the
-folder.
+is read-only). The gear in the panel edits the same file and can open the folder.
+Quit is in that dialog.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -273,7 +274,7 @@ src-tauri/src/
   commands.rs            IPC surface
   settings.rs            config/settings.json
   types.rs               what crosses the bridge, and how a tooltip becomes a row
-  i18n.rs                the language setting, and the tray menu's own strings
+  i18n.rs                the language setting
   version.rs             the version label the panel shows
   win/host.rs            loads trailist_host.dll and talks to it
   win/forward.rs         replaying clicks, only when the host is not attached
@@ -309,8 +310,8 @@ this machine's tray actually produces into a name and a state. Every case in it
 came off a real tray, including the awkward ones — the name repeated on one
 line, the name repeated across two, a name that merely shares a word, and a
 tooltip that is nothing but the name twice. Further tests cover the language
-setting (the setting wins over the system's language, and every language has a
-complete tray menu) and that a flat white glyph is recoloured for a light shell.
+setting (the setting wins over the system's language) and that a flat white glyph
+is recoloured for a light shell.
 The frontend's own strings are checked by the compiler rather than by a test —
 the tables are one object each, so `tsc` is what catches a key that no longer
 exists.

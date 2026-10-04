@@ -15,27 +15,12 @@ pub mod win;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-use parking_lot::Mutex;
-
 use crate::settings::Store;
 use crate::state::{AppState, Request, Shared};
-use crate::types::Prefs;
 use crate::win::{focus, island};
-
-const TRAY_ID: &str = "trailist";
-const ICON: &[u8] = include_bytes!("../icons/32x32.png");
-
-/// The language the tray menu is currently labelled in.
-///
-/// Windows draws that menu, so a language change means handing it a new one. The
-/// menu is rebuilt only when this differs from the language asked for, which is
-/// what keeps an ordinary settings write from touching the shell at all.
-static TRAY_LANG: Mutex<Option<i18n::Lang>> = Mutex::new(None);
 
 pub fn run() {
     let store = Arc::new(Store::open());
@@ -69,6 +54,7 @@ pub fn run() {
             commands::set_pinned,
             commands::system_lang,
             commands::open_config,
+            commands::quit,
             commands::toggle,
         ])
         .setup(move |app| {
@@ -76,12 +62,11 @@ pub fn run() {
             shared.attach(sender);
 
             // One running copy. A second launch asks this one to show the list
-            // and then leaves, before a second tray icon is created.
+            // and then leaves.
             if !win::instance::claim(handle.clone()) {
                 handle.exit(0);
                 return Ok(());
             }
-            build_tray(&handle)?;
             win::update::spawn(handle.clone());
             register_hotkey(&handle, &watcher_store);
             watcher::spawn(handle, watcher_shared, receiver);
@@ -129,66 +114,6 @@ pub fn run() {
             }
             let _ = app;
         });
-}
-
-/// The tray icon and its menu: the whole app is reachable from here, including
-/// when the shell decides the chevron is not where the user expects it.
-fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let lang = i18n::Lang::resolve(&app.state::<AppState>().prefs().lang);
-    let menu = tray_menu(app, lang)?;
-    *TRAY_LANG.lock() = Some(lang);
-
-    TrayIconBuilder::with_id(TRAY_ID)
-        .icon(tauri::image::Image::from_bytes(ICON)?)
-        .tooltip("TrayList")
-        .menu(&menu)
-        .show_menu_on_left_click(true)
-        .on_menu_event(|app, event| match event.id().0.as_str() {
-            "tl:show" => {
-                app.state::<AppState>().shared.send(Request::Toggle);
-            }
-            "tl:config" => {
-                let directory = app.state::<AppState>().store.directory().to_path_buf();
-                let _ = std::process::Command::new("explorer").arg(directory).spawn();
-            }
-            "tl:quit" => app.exit(0),
-            _ => {}
-        })
-        .build(app)?;
-    Ok(())
-}
-
-/// The tray menu in one language.
-fn tray_menu(app: &AppHandle, lang: i18n::Lang) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let [show, config, quit] = lang.tray_menu();
-    let show = MenuItemBuilder::with_id("tl:show", show).build(app)?;
-    let config = MenuItemBuilder::with_id("tl:config", config).build(app)?;
-    let quit = MenuItemBuilder::with_id("tl:quit", quit).build(app)?;
-
-    MenuBuilder::new(app)
-        .items(&[&show, &config])
-        .separator()
-        .item(&quit)
-        .build()
-}
-
-/// Re-labels the tray menu when the language setting has moved.
-///
-/// Called after every settings write, which is cheap: nothing is rebuilt unless the
-/// language actually differs from the one on screen.
-pub fn retitle_tray(app: &AppHandle, prefs: &Prefs) {
-    let lang = i18n::Lang::resolve(&prefs.lang);
-    if *TRAY_LANG.lock() == Some(lang) {
-        return;
-    }
-    let Ok(menu) = tray_menu(app, lang) else {
-        return;
-    };
-    if let Some(icon) = app.tray_by_id(TRAY_ID) {
-        if icon.set_menu(Some(menu)).is_ok() {
-            *TRAY_LANG.lock() = Some(lang);
-        }
-    }
 }
 
 /// Registers the "show the list" hotkey, if one is configured.

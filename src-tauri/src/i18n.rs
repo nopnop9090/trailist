@@ -50,18 +50,6 @@ impl Lang {
             Self::En
         }
     }
-
-    /// The three tray menu entries: show the list, open the config folder, quit.
-    pub fn tray_menu(self) -> [&'static str; 3] {
-        match self {
-            Self::De => [
-                "Symbol-Liste zeigen",
-                "config-Ordner öffnen",
-                "Beenden",
-            ],
-            Self::En => ["Show the icon list", "Open the config folder", "Quit"],
-        }
-    }
 }
 
 #[cfg(test)]
@@ -77,16 +65,5 @@ mod tests {
         assert!(matches!(Lang::resolve("system"), Lang::De | Lang::En));
         assert!(matches!(Lang::resolve("klingon"), Lang::De | Lang::En));
         assert!(matches!(Lang::resolve(""), Lang::De | Lang::En));
-    }
-
-    /// The menu is as long as the tray expects and differs between the languages.
-    #[test]
-    fn every_language_has_a_complete_menu() {
-        for lang in [Lang::De, Lang::En] {
-            let entries = lang.tray_menu();
-            assert_eq!(entries.len(), 3);
-            assert!(entries.iter().all(|entry| !entry.is_empty()));
-        }
-        assert_ne!(Lang::De.tray_menu()[0], Lang::En.tray_menu()[0]);
     }
 }

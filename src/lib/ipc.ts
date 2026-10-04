@@ -126,6 +126,8 @@ export const api = {
   setPinned: (index: number, pinned: boolean) =>
     invoke<void>("set_pinned", { index, pinned }),
   openConfig: () => invoke<void>("open_config"),
+  /** Quits. The settings dialog is the only control that offers this. */
+  quit: () => invoke<void>("quit"),
   toggle: () => invoke<void>("toggle"),
   /** Whether TrayList is set to start with Windows. */
   getAutostart: () => invoke<boolean>("get_autostart"),

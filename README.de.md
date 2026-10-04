@@ -85,6 +85,7 @@ die Tooltips — sie stehen nur nirgends auf einmal. Genau das löst dieses Prog
 - Mit Windows starten, über den Autostart-Eintrag, den Windows selbst liest
 - Filterfeld an oder aus, immer sichtbare zuerst, alphabetisch oder Tray-Reihenfolge
 - Sprache: `System`, `Deutsch` oder `English`
+- Beenden, im selben Dialog
 
 **Tray-Eigenschaften**
 - Pin-Knopf pro Zeile, auch bei Symbolen, die schon in der sichtbaren Leiste
@@ -173,8 +174,8 @@ gemeldet hat.
 ## Einstellungen
 
 `config/settings.json` neben der Exe (oder `%APPDATA%\TrayList`, wenn dieser
-Ordner schreibgeschützt ist). Das Zahnrad im Panel bearbeitet dieselbe Datei; das
-Tray-Menü öffnet den Ordner.
+Ordner schreibgeschützt ist). Das Zahnrad im Panel bearbeitet dieselbe Datei und
+kann den Ordner öffnen. Beenden liegt in diesem Dialog.
 
 | Schlüssel | Standard | Bedeutung |
 |---|---|---|
@@ -282,7 +283,7 @@ src-tauri/src/
   commands.rs            die IPC-Oberfläche
   settings.rs            config/settings.json
   types.rs               was über die Brücke geht, und wie aus einem Tooltip eine Zeile wird
-  i18n.rs                Sprachauswahl und die Texte des Tray-Menüs
+  i18n.rs                die Sprachauswahl
   version.rs             die Versionszeile, die das Panel zeigt
   win/host.rs            lädt trailist_host.dll und spricht mit ihr
   win/forward.rs         Klicks nachspielen, nur wenn der Host nicht hängt
@@ -318,8 +319,8 @@ dieses Rechners tatsächlich produziert, einen Namen und einen Zustand zu machen
 Jeder Fall darin kommt von einem echten Tray, auch die unangenehmen — der Name auf
 einer Zeile wiederholt, über zwei Zeilen wiederholt, ein Name, der nur ein Wort
 teilt, und ein Tooltip, der nichts als der zweimalige Name ist. Weitere Tests
-prüfen die Sprachauswahl (eine Einstellung gilt vor der Systemsprache, und jede
-Sprache hat ein vollständiges Tray-Menü) und dass eine weiße Glyphe für eine helle
+prüfen die Sprachauswahl (eine Einstellung gilt vor der Systemsprache) und dass
+eine weiße Glyphe für eine helle
 Shell umgefärbt wird.
 
 Das Host-Crate prüft das 32-Bit-`NOTIFYICONDATA`-Layout, das dieser Build wirklich
