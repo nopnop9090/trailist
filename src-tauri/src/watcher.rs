@@ -86,7 +86,7 @@ pub fn spawn(app: AppHandle, shared: Arc<Shared>, receiver: Receiver<Request>) {
 }
 
 fn run(app: AppHandle, shared: Arc<Shared>, receiver: Receiver<Request>) {
-    // A missing reader is not fatal: the tray menu still explains itself.
+    // A missing reader is not fatal: the host list does not need it.
     let reader = match uia::Reader::new() {
         Ok(reader) => Some(reader),
         Err(error) => {
@@ -577,7 +577,7 @@ fn tick(
 
         Phase::Open { island_window, rect } => {
             if !shared.visible() {
-                // Dismissed: Esc, a row click, a click away, or the tray menu.
+                // Dismissed: Esc, a row click, a click away, or the hotkey.
                 crate::trace!("watcher: panel no longer wanted, closing");
                 let window = island::hwnd(island_window);
                 if island::is_visible(window) {

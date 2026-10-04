@@ -1,4 +1,4 @@
-//! What the watcher thread, the commands and the tray menu share.
+//! What the watcher thread and the commands share.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
