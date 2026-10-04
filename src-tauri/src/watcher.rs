@@ -895,7 +895,7 @@ fn listed_icons<'a>(
     let mut ranked: Vec<&host::HostIcon> = Vec::new();
     let mut slot_of: std::collections::HashMap<(isize, u32), usize> = std::collections::HashMap::new();
     for icon in icons {
-        if icon.hidden || !icon.window_alive() {
+        if icon.hidden || !icon.window_alive() || shell_owned(&icon.key) {
             continue;
         }
         let slot = (icon.hwnd, icon.id);
@@ -948,6 +948,25 @@ fn listed_icons<'a>(
             newest.get(&(exe.to_ascii_lowercase(), tip.to_ascii_lowercase())) == Some(&icon.hwnd)
         })
         .collect()
+}
+
+/// Icons the shell draws itself, next to the clock, rather than in the overflow.
+///
+/// The numbers are the shell's own: clock, volume, network, power, the old
+/// action centre, and the "microphone in use" indicator. `7820AE78` is not in
+/// the set. That one is "Safely Remove Hardware", which does belong in the list.
+fn shell_owned(key: &str) -> bool {
+    const GUIDS: &[&str] = &[
+        "7820AE72-23E3-4229-82C1-E41CB67D5B9C",
+        "7820AE73-23E3-4229-82C1-E41CB67D5B9C",
+        "7820AE74-23E3-4229-82C1-E41CB67D5B9C",
+        "7820AE75-23E3-4229-82C1-E41CB67D5B9C",
+        "7820AE76-23E3-4229-82C1-E41CB67D5B9C",
+        "7820AE82-23E3-4229-82C1-E41CB67D5B9C",
+    ];
+    let rest = key.trim().strip_prefix("guid:").unwrap_or(key.trim());
+    let rest = rest.trim_matches(|ch| ch == '{' || ch == '}');
+    GUIDS.iter().any(|guid| rest.eq_ignore_ascii_case(guid))
 }
 
 fn richer(candidate: &host::HostIcon, current: &host::HostIcon) -> bool {
@@ -1029,4 +1048,17 @@ pub fn shell_build() -> String {
                 .unwrap_or_default()
         })
         .clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_owned;
+
+    #[test]
+    fn the_volume_icon_is_shell_owned_and_safely_remove_is_not() {
+        assert!(shell_owned("guid:{7820AE73-23E3-4229-82C1-E41CB67D5B9C}"));
+        assert!(shell_owned("guid:{7820ae82-23e3-4229-82c1-e41cb67d5b9c}"));
+        assert!(!shell_owned("guid:{7820AE78-23E3-4229-82C1-E41CB67D5B9C}"));
+        assert!(!shell_owned("guid:{DAD9A1A0-1DBB-EFBB-F36F-BA6D1E451BCC}"));
+    }
 }
