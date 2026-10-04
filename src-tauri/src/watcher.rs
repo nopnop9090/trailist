@@ -163,12 +163,7 @@ fn run(app: AppHandle, shared: Arc<Shared>, receiver: Receiver<Request>) {
                             publish_host(&app, &shared, reader.as_ref(), session, true);
                             phase = Phase::Open {
                                 island_window: 0,
-                                rect: shared.flyout().unwrap_or(island::Rect {
-                                    left: 0,
-                                    top: 0,
-                                    right: 1,
-                                    bottom: 1,
-                                }),
+                                rect: shared.flyout().unwrap_or_else(|| panel_anchor(reader.as_ref())),
                             };
                         }
                     }
@@ -256,12 +251,7 @@ fn handle_request(
                     publish_host(app, shared, reader, session, true);
                     *phase = Phase::Open {
                         island_window: 0,
-                        rect: shared.flyout().unwrap_or(island::Rect {
-                            left: 0,
-                            top: 0,
-                            right: 1,
-                            bottom: 1,
-                        }),
+                        rect: shared.flyout().unwrap_or_else(|| panel_anchor(reader)),
                     };
                     return;
                 }
@@ -484,7 +474,16 @@ fn tick(
                 *cooldown_until = now + COOLDOWN;
                 return Phase::Idle;
             };
-            island::remember_rect(onscreen);
+            // A flyout that has only just been created still sits at the origin.
+            // That is not where the chevron is, so the panel must not follow it.
+            let placement = if island::beside_taskbar(onscreen) {
+                island::remember_rect(onscreen);
+                onscreen
+            } else {
+                island::remembered_rect()
+                    .filter(|rect| island::beside_taskbar(*rect))
+                    .unwrap_or_else(|| panel_anchor(Some(reader)))
+            };
             island::park(window, onscreen);
 
             let reading_since = Instant::now();
@@ -552,16 +551,18 @@ fn tick(
             let items = collect(onscreen, &raw, bitmap, &prefs);
             let count = items.len();
 
-            shared.set_items(items.clone(), island_window, onscreen);
+            shared.set_items(items.clone(), island_window, placement);
             publish(app, items, None, false, true);
-            overlay::show(app, onscreen, count, &prefs);
+            overlay::show(app, placement, count, &prefs);
             shared.set_visible(true);
             crate::trace!(
-                "watcher: showing {count} icons, flyout {}x{} at {},{}",
+                "watcher: showing {count} icons, flyout {}x{} at {},{}, panel anchor {},{}",
                 onscreen.width(),
                 onscreen.height(),
                 onscreen.left,
-                onscreen.top
+                onscreen.top,
+                placement.left,
+                placement.top
             );
             dump(&shared.items());
 
@@ -570,7 +571,7 @@ fn tick(
 
             Phase::Open {
                 island_window,
-                rect: onscreen,
+                rect: placement,
             }
         }
 
@@ -960,33 +961,30 @@ fn richer(candidate: &host::HostIcon, current: &host::HostIcon) -> bool {
     score(candidate) > score(current)
 }
 
-/// A one-pixel-tall anchor centred on the chevron, sitting on the taskbar top.
-/// The panel is placed from that the same way it used to be placed from the flyout.
+/// Where the panel hangs. A chevron whose box is empty is ignored, and the
+/// result is never the origin just because a lookup failed.
 fn panel_anchor(reader: Option<&uia::Reader>) -> island::Rect {
-    let Some(taskbar) = island::find_by_class(island::TASKBAR_CLASS) else {
-        return island::Rect {
-            left: 0,
-            top: 0,
-            right: 1,
-            bottom: 1,
-        };
+    island::tray_anchor(chevron_rect(reader))
+}
+
+fn chevron_rect(reader: Option<&uia::Reader>) -> Option<island::Rect> {
+    let taskbar = island::find_by_class(island::TASKBAR_CLASS)?;
+    let bounds = reader?
+        .chevron(island::raw(taskbar))
+        .ok()
+        .flatten()?
+        .get_bounding_rectangle()
+        .ok()?;
+    let rect = island::Rect {
+        left: bounds.get_left(),
+        top: bounds.get_top(),
+        right: bounds.get_right(),
+        bottom: bounds.get_bottom(),
     };
-    let taskbar_rect = island::rect(taskbar).unwrap_or(island::Rect {
-        left: 0,
-        top: 0,
-        right: 1,
-        bottom: 1,
-    });
-    let centre = reader
-        .and_then(|reader| reader.chevron(island::raw(taskbar)).ok().flatten())
-        .and_then(|chevron| chevron.get_bounding_rectangle().ok())
-        .map(|bounds| (bounds.get_left() + bounds.get_right()) / 2)
-        .unwrap_or(taskbar_rect.right - 48);
-    island::Rect {
-        left: centre,
-        right: centre + 1,
-        top: taskbar_rect.top - 1,
-        bottom: taskbar_rect.top,
+    if rect.width() > 0 && rect.height() > 0 && island::beside_taskbar(rect) {
+        Some(rect)
+    } else {
+        None
     }
 }
 

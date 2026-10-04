@@ -26,20 +26,25 @@ pub fn window(app: &AppHandle) -> Option<WebviewWindow> {
 
 /// Anchors the panel to the tray corner.
 ///
-/// Two things decide where it lands. Horizontally it is *centred on the flyout*,
-/// and the shell centres the flyout on the chevron — so the panel sits centred
-/// under the button the user actually clicked, rather than being pushed to the
-/// right edge of the screen by its own width. Vertically the window's bottom edge
-/// lands on the flyout's bottom, which is the top of the taskbar, so the panel
-/// rests against the taskbar the way the native flyout does.
+/// The anchor is the flyout when that window is actually beside a taskbar, and
+/// the chevron otherwise. An anchor at the origin — a window that has not been
+/// placed yet — is refused, because that is what put the list in the top-left
+/// corner of the screen.
 ///
-/// The one remaining offset is `prefs.edge_gap`, zero by default: anything larger
-/// is the user asking for air between the panel and the shell.
+/// Horizontally the panel is centred on that anchor, which is the chevron.
+/// Vertically it rests against the same edge of the work area the taskbar
+/// occupies. `prefs.edge_gap`, zero by default, is air between the panel and
+/// the shell.
 pub fn geometry(
     flyout: island::Rect,
     count: usize,
     prefs: &Prefs,
 ) -> (PhysicalPosition<i32>, PhysicalSize<i32>) {
+    let flyout = if island::beside_taskbar(flyout) {
+        flyout
+    } else {
+        island::tray_anchor(None)
+    };
     let scale = island::dpi_scale(island::hwnd(0)).max(1.0);
     let px = |logical: i32| ((logical as f64) * scale).round() as i32;
 
@@ -53,8 +58,8 @@ pub fn geometry(
     .unwrap_or(island::Rect {
         left: 0,
         top: 0,
-        right: flyout.right,
-        bottom: flyout.bottom,
+        right: flyout.right.max(1),
+        bottom: flyout.bottom.max(1),
     });
 
     let panel_width = px(prefs.panel_width).min((work.width() - 2 * gap).max(px(240)));
@@ -66,13 +71,49 @@ pub fn geometry(
 
     let width = panel_width + 2 * shadow;
     let height = panel_height + 2 * shadow;
+    let (x, y) = hang(flyout, work, width, height, gap);
 
-    let mut x = flyout.left + flyout.width() / 2 - width / 2;
-    // The transparent margin under the card has to end at the taskbar, not on top
-    // of it: this window is always-on-top and not click-through, so an overlap
-    // there would swallow clicks meant for the taskbar.
-    let mut y = flyout.bottom - gap - height;
+    (PhysicalPosition::new(x, y), PhysicalSize::new(width, height))
+}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Edge {
+    Left,
+    Top,
+    Right,
+    Bottom,
+}
+
+/// Which side of the work area the anchor is leaning on.
+fn nearest_edge(anchor: island::Rect, work: island::Rect) -> Edge {
+    let choices = [
+        (Edge::Bottom, (anchor.bottom - work.bottom).abs()),
+        (Edge::Top, (anchor.top - work.top).abs()),
+        (Edge::Left, (anchor.left - work.left).abs()),
+        (Edge::Right, (anchor.right - work.right).abs()),
+    ];
+    choices
+        .into_iter()
+        .min_by_key(|(_, distance)| *distance)
+        .map(|(edge, _)| edge)
+        .unwrap_or(Edge::Bottom)
+}
+
+/// The window's outer position, before it is clamped into the work area.
+///
+/// The bottom edge is the usual one: the anchor's bottom is the top of the
+/// taskbar, and the transparent margin under the card has to end there. An
+/// overlap would swallow clicks meant for the taskbar, because this window is
+/// always-on-top and not click-through.
+fn hang(anchor: island::Rect, work: island::Rect, width: i32, height: i32, gap: i32) -> (i32, i32) {
+    let centre_x = anchor.left + anchor.width() / 2;
+    let centre_y = anchor.top + anchor.height() / 2;
+    let (mut x, mut y) = match nearest_edge(anchor, work) {
+        Edge::Bottom => (centre_x - width / 2, anchor.bottom - gap - height),
+        Edge::Top => (centre_x - width / 2, anchor.top + gap),
+        Edge::Left => (anchor.right + gap, centre_y - height / 2),
+        Edge::Right => (anchor.left - gap - width, centre_y - height / 2),
+    };
     x = x.clamp(
         work.left + gap,
         (work.right - width - gap).max(work.left + gap),
@@ -81,8 +122,7 @@ pub fn geometry(
         work.top + gap,
         (work.bottom - height - gap).max(work.top + gap),
     );
-
-    (PhysicalPosition::new(x, y), PhysicalSize::new(width, height))
+    (x, y)
 }
 
 /// Sizes and places the panel without showing it, and hands back what it used.
@@ -100,6 +140,17 @@ pub fn place(
     let (position, size) = geometry(flyout, count, prefs);
     let _ = window.set_size(size);
     let _ = window.set_position(position);
+    // The webview's move is posted to its own thread and can be dropped, which
+    // leaves the window where it was created: the top-left of the screen.
+    if let Ok(handle) = window.hwnd() {
+        island::pin(
+            island::hwnd(handle.0 as isize),
+            position.x,
+            position.y,
+            size.width,
+            size.height,
+        );
+    }
     (position, size)
 }
 
@@ -168,6 +219,18 @@ pub fn show(app: &AppHandle, flyout: island::Rect, count: usize, prefs: &Prefs) 
             None => crate::trace!("overlay: own window not found by title yet"),
         }
     }
+    // Posted after `show`, so it runs once the window is visible. A show that
+    // restored the creation position is corrected on the thread that owns it.
+    let raw = window.hwnd().ok().map(|handle| handle.0 as isize);
+    let x = position.x;
+    let y = position.y;
+    let width = size.width;
+    let height = size.height;
+    let _ = window.run_on_main_thread(move || {
+        if let Some(raw) = raw {
+            island::pin(island::hwnd(raw), x, y, width, height);
+        }
+    });
 }
 
 pub fn hide(app: &AppHandle) {
@@ -228,4 +291,46 @@ pub fn is_dismissable() -> bool {
         .map(|shown| shown.elapsed() > SETTLE)
         .unwrap_or(true);
     settled && HAD_FOCUS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hang, Edge, nearest_edge};
+    use crate::win::island::Rect;
+
+    fn work() -> Rect {
+        Rect {
+            left: 0,
+            top: 0,
+            right: 5120,
+            bottom: 1392,
+        }
+    }
+
+    #[test]
+    fn a_chevron_anchor_hangs_off_the_bottom_right() {
+        let anchor = Rect {
+            left: 4867,
+            top: 1391,
+            right: 4868,
+            bottom: 1392,
+        };
+        assert_eq!(nearest_edge(anchor, work()), Edge::Bottom);
+        let (x, y) = hang(anchor, work(), 400, 500, 0);
+        assert!(x > 4000, "x={x}");
+        assert_eq!(y, 1392 - 500);
+    }
+
+    #[test]
+    fn the_origin_would_hang_off_the_top_if_it_were_accepted() {
+        let origin = Rect {
+            left: 0,
+            top: 0,
+            right: 1,
+            bottom: 1,
+        };
+        assert_eq!(nearest_edge(origin, work()), Edge::Top);
+        let (x, y) = hang(origin, work(), 400, 500, 0);
+        assert_eq!((x, y), (0, 0));
+    }
 }

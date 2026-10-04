@@ -31,7 +31,7 @@ clicks to the icon that registered them. No elevation.
 |---|---|
 | **What** | The Windows 11 tray overflow, as a named and filterable list instead of a grid of 16x16 glyphs. |
 | **Who** | Written for one very full tray, with an AI assistant doing the typing — which is what the badge at the bottom is about. |
-| **When** | Version `0.5.1`. The build stamp is baked in at compile time and shown in the panel's footer, in the settings dialog, and to `trailist-probe theme`. |
+| **When** | Version `0.5.2`. The build stamp is baked in at compile time and shown in the panel's footer, in the settings dialog, and to `trailist-probe theme`. |
 | **How** | A small DLL inside Explorer records each `Shell_NotifyIcon` registration and forwards hover and clicks to that window. A React panel draws the list. If the DLL cannot attach, the previous UI Automation path remains and the panel says so. Settings live in `config/settings.json` next to the exe. |
 
 The settings dialog, including where the badge and the version live:
@@ -65,7 +65,8 @@ just are not shown anywhere at once. That is the whole problem this solves.
   comes first. A newer release asks before the release page is opened. Nothing is
   downloaded. The same check is a switch and a button in the settings
 - Panel sized to the content, centred on the chevron that was clicked and resting
-  on the taskbar, always inside the work area of the right monitor
+  on the taskbar, always inside the work area of that monitor. A position that is
+  not beside the taskbar is refused, so the list cannot open in the top-left corner
 - Follows the shell's colour scheme: the palette is chosen from
   `SystemUsesLightTheme`, the same setting the taskbar and the flyout follow, so
   the panel matches the tray it replaces even when Windows is set to a different

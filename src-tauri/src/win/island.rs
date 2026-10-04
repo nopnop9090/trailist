@@ -238,6 +238,205 @@ pub fn is_on_screen(rect: Rect) -> bool {
     rect.left > -10_000 && rect.top > -10_000 && rect.width() > 0 && rect.height() > 0
 }
 
+/// Every taskbar, primary first. A point on one of these is a click on the tray.
+pub fn taskbars() -> Vec<Rect> {
+    let mut bars = Vec::new();
+    for class in [TASKBAR_CLASS, SECONDARY_TASKBAR_CLASS] {
+        for handle in all_by_class(class) {
+            if let Some(rect) = rect(handle) {
+                bars.push(rect);
+            }
+        }
+    }
+    bars
+}
+
+/// The anchor touches a taskbar, so it can place the panel. A rectangle at the
+/// origin does not: that is where a window is born, not where the chevron is.
+pub fn beside_taskbar(anchor: Rect) -> bool {
+    if anchor.width() <= 0 || anchor.height() <= 0 {
+        return false;
+    }
+    let centre_x = anchor.left + anchor.width() / 2;
+    let centre_y = anchor.top + anchor.height() / 2;
+    if !point_on_monitor(centre_x, centre_y) {
+        return false;
+    }
+    taskbars().iter().any(|bar| touches(*bar, anchor, 120))
+}
+
+/// Where the panel hangs from. The click is used when it is still on a taskbar,
+/// otherwise the chevron, otherwise the tray end of the taskbar. Never the
+/// origin: a missing measurement is what put the list in the top-left corner.
+pub fn tray_anchor(chevron: Option<Rect>) -> Rect {
+    let bars = taskbars();
+    let cursor = cursor_pos();
+    let Some(bar) = pick_bar(&bars, cursor, chevron) else {
+        return work_corner(cursor);
+    };
+    let along = along_bar(bar, cursor, chevron);
+    let mid_x = bar.left + bar.width() / 2;
+    let mid_y = bar.top + bar.height() / 2;
+    let work = work_area_for_point(mid_x, mid_y).unwrap_or(bar);
+    inner_marker(bar, work, along)
+}
+
+/// Puts the window exactly where it was measured, on this thread.
+///
+/// The webview posts its own move, and that post can lose to the window being
+/// shown at the origin it was created at. A synchronous move afterwards is the
+/// one that sticks.
+pub fn pin(handle: HWND, x: i32, y: i32, width: i32, height: i32) {
+    if handle.is_invalid() || width <= 0 || height <= 0 {
+        return;
+    }
+    unsafe {
+        let _ = SetWindowPos(
+            handle,
+            None,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+fn cursor_pos() -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let mut point = POINT::default();
+    unsafe { GetCursorPos(&mut point).ok()? };
+    Some((point.x, point.y))
+}
+
+fn point_on_monitor(x: i32, y: i32) -> bool {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTONULL};
+
+    let monitor = unsafe { MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONULL) };
+    !monitor.is_invalid()
+}
+
+/// Bottom-right of the work area under the pointer. Used only when no taskbar
+/// window can be found at all.
+fn work_corner(cursor: Option<(i32, i32)>) -> Rect {
+    let (x, y) = cursor.unwrap_or((0, 0));
+    let work = work_area_for_point(x, y).unwrap_or(Rect {
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+    });
+    Rect {
+        left: work.right - 1,
+        right: work.right,
+        top: work.bottom - 1,
+        bottom: work.bottom,
+    }
+}
+
+fn pick_bar(bars: &[Rect], cursor: Option<(i32, i32)>, chevron: Option<Rect>) -> Option<Rect> {
+    if let Some((x, y)) = cursor {
+        if let Some(bar) = bars.iter().copied().find(|bar| contains(*bar, x, y, 24)) {
+            return Some(bar);
+        }
+    }
+    if let Some(chevron) = chevron {
+        if let Some(bar) = bars.iter().copied().find(|bar| touches(*bar, chevron, 8)) {
+            return Some(bar);
+        }
+    }
+    bars.first().copied()
+}
+
+fn along_bar(bar: Rect, cursor: Option<(i32, i32)>, chevron: Option<Rect>) -> i32 {
+    let horizontal = bar.width() >= bar.height();
+    if let Some((x, y)) = cursor {
+        if contains(bar, x, y, 48) {
+            return if horizontal { x } else { y };
+        }
+    }
+    if let Some(chevron) = chevron {
+        if touches(bar, chevron, 32) {
+            return if horizontal {
+                chevron.left + chevron.width() / 2
+            } else {
+                chevron.top + chevron.height() / 2
+            };
+        }
+    }
+    tray_end(bar)
+}
+
+/// The notification area is at the far end of the bar. Horizontal bars keep it
+/// at the right, vertical ones at the bottom.
+fn tray_end(bar: Rect) -> i32 {
+    if bar.width() >= bar.height() {
+        (bar.right - 64).clamp(bar.left, (bar.right - 1).max(bar.left))
+    } else {
+        (bar.bottom - 64).clamp(bar.top, (bar.bottom - 1).max(bar.top))
+    }
+}
+
+/// One pixel on the side of the taskbar that faces the desktop.
+pub(crate) fn inner_marker(bar: Rect, work: Rect, along: i32) -> Rect {
+    if bar.width() >= bar.height() {
+        let x = along.clamp(bar.left, (bar.right - 1).max(bar.left));
+        if (bar.top - work.bottom).abs() <= (bar.bottom - work.top).abs() {
+            Rect {
+                left: x,
+                right: x + 1,
+                top: bar.top - 1,
+                bottom: bar.top,
+            }
+        } else {
+            Rect {
+                left: x,
+                right: x + 1,
+                top: bar.bottom,
+                bottom: bar.bottom + 1,
+            }
+        }
+    } else {
+        let y = along.clamp(bar.top, (bar.bottom - 1).max(bar.top));
+        if (bar.left - work.right).abs() <= (bar.right - work.left).abs() {
+            Rect {
+                left: bar.left - 1,
+                right: bar.left,
+                top: y,
+                bottom: y + 1,
+            }
+        } else {
+            Rect {
+                left: bar.right,
+                right: bar.right + 1,
+                top: y,
+                bottom: y + 1,
+            }
+        }
+    }
+}
+
+pub(crate) fn touches(bar: Rect, anchor: Rect, slack: i32) -> bool {
+    let grown = Rect {
+        left: bar.left - slack,
+        top: bar.top - slack,
+        right: bar.right + slack,
+        bottom: bar.bottom + slack,
+    };
+    grown.left < anchor.right
+        && anchor.left < grown.right
+        && grown.top < anchor.bottom
+        && anchor.top < grown.bottom
+}
+
+fn contains(bar: Rect, x: i32, y: i32, slack: i32) -> bool {
+    x >= bar.left - slack && x < bar.right + slack && y >= bar.top - slack && y < bar.bottom + slack
+}
+
 /// Off-screen resting place for the flyout.
 ///
 /// Far enough left that no monitor can be there, but still *shown*. That
@@ -309,5 +508,55 @@ pub fn hide(handle: HWND) {
 pub fn show_without_activating(handle: HWND) {
     unsafe {
         let _ = ShowWindow(handle, SW_SHOWNOACTIVATE);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{inner_marker, touches, Rect};
+
+    fn bottom_bar() -> Rect {
+        Rect {
+            left: 0,
+            top: 1392,
+            right: 5120,
+            bottom: 1440,
+        }
+    }
+
+    #[test]
+    fn the_origin_is_not_the_chevron() {
+        let origin = Rect {
+            left: 0,
+            top: 0,
+            right: 1,
+            bottom: 1,
+        };
+        assert!(!touches(bottom_bar(), origin, 120));
+    }
+
+    #[test]
+    fn a_flyout_sitting_on_the_taskbar_counts() {
+        let flyout = Rect {
+            left: 4750,
+            top: 998,
+            right: 4984,
+            bottom: 1392,
+        };
+        assert!(touches(bottom_bar(), flyout, 120));
+    }
+
+    #[test]
+    fn the_marker_sits_on_the_inner_edge_at_the_chevron() {
+        let work = Rect {
+            left: 0,
+            top: 0,
+            right: 5120,
+            bottom: 1392,
+        };
+        let marker = inner_marker(bottom_bar(), work, 4867);
+        assert_eq!(marker.left, 4867);
+        assert_eq!(marker.bottom, 1392);
+        assert!(marker.top < marker.bottom);
     }
 }
