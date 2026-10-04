@@ -33,7 +33,7 @@ der Rechte.
 |---|---|
 | **Was** | Der Windows-11-Tray-Überlauf als benannte und filterbare Liste statt als Raster aus 16×16-Piktogrammen. |
 | **Wer** | Geschrieben für einen sehr vollen Tray, mit einem KI-Assistenten als Tippkraft — darum geht es beim Badge unten. |
-| **Wann** | Version `0.5.2`. Der Build-Stempel wird beim Kompilieren eingebacken und im Footer des Panels, im Einstellungsdialog und für `trailist-probe theme` angezeigt. |
+| **Wann** | Version `0.5.3`. Der Build-Stempel wird beim Kompilieren eingebacken und im Footer des Panels, im Einstellungsdialog und für `trailist-probe theme` angezeigt. |
 | **Wie** | Eine kleine DLL in Explorer merkt sich jede `Shell_NotifyIcon`-Registrierung und leitet Hover und Klicks an dieses Fenster weiter. Ein React-Panel zeichnet die Liste. Hängt sich die DLL nicht ein, bleibt der bisherige UI-Automation-Weg, und das Panel sagt das. Die Einstellungen liegen in `config/settings.json` neben der Exe. |
 
 Der Einstellungsdialog, samt Badge und Version:
@@ -65,9 +65,11 @@ die Tooltips — sie stehen nur nirgends auf einmal. Genau das löst dieses Prog
 - Ein erneuter Start findet die bereits laufende Kopie
 - Der erste Start fragt, ob auf GitHub nach einer neueren Version gesucht werden
   soll. Ist das an, läuft die Prüfung einmal pro Start und, wenn das Programm offen
-  bleibt, einmal am Tag — je nachdem, was eher kommt. Eine neuere Version fragt,
-  bevor die Release-Seite geöffnet wird. Heruntergeladen wird nichts. Dieselbe
-  Prüfung ist ein Schalter und ein Knopf in den Einstellungen
+  bleibt, einmal am Tag — je nachdem, was eher kommt. Eine neuere Version bietet an,
+  das Setup herunterzuladen und die Installation zu starten, oder stattdessen die
+  Release-Seite zu öffnen. Lautstärke und Mikrofon-Anzeige der Shell bleiben aus
+  der Liste draußen. Dieselbe Prüfung ist ein Schalter und ein Knopf in den
+  Einstellungen
 - Panel passend zum Inhalt, auf den geklickten Pfeil zentriert und auf der
   Taskleiste aufsitzend, immer innerhalb des Arbeitsbereichs des richtigen Monitors.
   Eine Position, die nicht an der Taskleiste liegt, wird verworfen, damit die Liste
