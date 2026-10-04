@@ -1,6 +1,6 @@
 [package]
 name = "trailist"
-version = "0.5.3"
+version = "0.5.4"
 description = "Shows the hidden Windows tray icons as a scrollable list with names instead of an icon grid"
 authors = ["TrayList"]
 edition = "2021"

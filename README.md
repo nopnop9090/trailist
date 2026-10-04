@@ -31,7 +31,7 @@ clicks to the icon that registered them. No elevation.
 |---|---|
 | **What** | The Windows 11 tray overflow, as a named and filterable list instead of a grid of 16x16 glyphs. |
 | **Who** | Written for one very full tray, with an AI assistant doing the typing — which is what the badge at the bottom is about. |
-| **When** | Version `0.5.3`. The build stamp is baked in at compile time and shown in the panel's footer, in the settings dialog, and to `trailist-probe theme`. |
+| **When** | Version `0.5.4`. The build stamp is baked in at compile time and shown in the panel's footer, in the settings dialog, and to `trailist-probe theme`. |
 | **How** | A small DLL inside Explorer records each `Shell_NotifyIcon` registration and forwards hover and clicks to that window. A React panel draws the list. If the DLL cannot attach, the previous UI Automation path remains and the panel says so. Settings live in `config/settings.json` next to the exe. |
 
 The settings dialog, including where the badge and the version live:
@@ -55,7 +55,11 @@ just are not shown anywhere at once. That is the whole problem this solves.
 - Sorting: the shell's own order, or alphabetical
 - Keyboard: `↑`/`↓` to move, `Enter` to open, `Esc` to close
 - Right-click a row for the icon's own context menu. The list stays open until
-  you click away, so a second right-click does not mean opening the panel again
+  you click away, so a second right-click does not mean opening the panel again.
+  A version-0 icon gets the button-down as well as the button-up, which is what
+  Discord and ZCode open their menu from
+- The Windows Security row opens Windows Security. That icon never resends its
+  callback, so there is no message to forward
 - A double-click is forwarded as a double-click. The single click waits out the
   system double-click time, so an icon that opens on double-click and one that
   shows a menu on a single click behave as they do in the tray
@@ -210,7 +214,7 @@ visible strip.
 On this machine the registration arrives as a 32-bit `NOTIFYICONDATA` inside
 `WM_COPYDATA` (`dwData == 1`, signature `0x34753423`). An icon that never called
 `NIM_SETVERSION` is version 0: `wParam` is the icon id and `lParam` is the mouse
-message, so a right-click is `WM_RBUTTONUP`. Version 4, only after
+message, so a right-click is `WM_RBUTTONDOWN` and then `WM_RBUTTONUP`. Version 4, only after
 `NIM_SETVERSION`, packs the point into `wParam` and the event into the low half
 of `lParam`. Sending the version-4 form to a version-0 window does nothing.
 

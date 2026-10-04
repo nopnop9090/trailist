@@ -3626,7 +3626,7 @@ dependencies = [
 
 [[package]]
 name = "trailist"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

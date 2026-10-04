@@ -540,6 +540,7 @@ pub mod events {
     pub const WM_LBUTTONDOWN: u32 = 0x0201;
     pub const WM_LBUTTONUP: u32 = 0x0202;
     pub const WM_LBUTTONDBLCLK: u32 = 0x0203;
+    pub const WM_RBUTTONDOWN: u32 = 0x0204;
     pub const WM_RBUTTONUP: u32 = 0x0205;
     pub const WM_MOUSEMOVE: u32 = 0x0200;
 }
@@ -581,9 +582,12 @@ pub fn deliver(record: &IconRecord, kind: &str, anchor: Anchor) {
                 notify(record, events::WM_LBUTTONUP, point);
             }
             "right" => {
-                // The mouse button, which is what a version-0 window shows its
-                // menu from. `WM_CONTEXTMENU` is the keyboard form; sending both
-                // opens the menu twice.
+                // Down, then up, which is the pair the shell sends. Electron
+                // (Discord) opens its menu from the down message and ignores
+                // the up. A window that opens from the up still gets that,
+                // once. `WM_CONTEXTMENU` as well is the keyboard form and opens
+                // a second menu in windows that handle both.
+                notify(record, events::WM_RBUTTONDOWN, point);
                 notify(record, events::WM_RBUTTONUP, point);
             }
             _ => {}

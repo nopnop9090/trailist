@@ -15,7 +15,7 @@ use crate::overlay;
 use crate::state::{AppState, Request, Shared};
 use crate::types::{Fault, Prefs, SortMode, TrayItem, TrayList};
 use crate::win::host::Session;
-use crate::win::{capture, forward, glyph, host, island, registry, theme, uia};
+use crate::win::{capture, forward, glyph, host, island, launch, registry, theme, uia};
 
 /// How often the flyout is looked for. Well below the point where a click feels
 /// unanswered, and the check is a couple of `EnumWindows` calls.
@@ -317,6 +317,24 @@ fn handle_request(
                 if session.bound {
                     if let Some(key) = shared.item_at(index).and_then(|item| item.host_key) {
                         let icon = session.icons.iter().find(|icon| icon.key == key).cloned();
+                        // No callback was ever observed for this registration, so
+                        // posting a click cannot reach it. Open the app instead.
+                        if !keep
+                            && icon
+                                .as_ref()
+                                .is_some_and(|icon| launch::is_windows_security(&key, icon.callback))
+                        {
+                            overlay::hide(app);
+                            shared.set_visible(false);
+                            shared.set_menu_hold(false);
+                            std::thread::sleep(PANEL_GOES_AWAY);
+                            if let Err(error) = launch::windows_security() {
+                                crate::trace!("watcher: Windows Security did not open: {error}");
+                            }
+                            *phase = Phase::Idle;
+                            *cooldown_until = Instant::now() + COOLDOWN;
+                            return;
+                        }
                         // Grant while this process is still foreground. Hiding the
                         // panel gives the foreground away, and the menu needs the
                         // grant to already be in place.

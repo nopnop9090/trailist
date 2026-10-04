@@ -84,10 +84,11 @@ impl HostIcon {
             return;
         }
         let window = hwnd_from(self.hwnd);
-        // Right-click is the button-up the shell sends for version 0. Sending
-        // `WM_CONTEXTMENU` as well opens a second menu in windows that handle
-        // both. Left-click is the down/up pair.
-        let messages: &[u32] = if right { &[0x0205] } else { &[0x0201, 0x0202] };
+        // Right-click is the down/up pair the shell sends for version 0.
+        // Electron opens its menu from the down message. `WM_CONTEXTMENU` as
+        // well opens a second menu in windows that handle both. Left-click is
+        // the same pair.
+        let messages: &[u32] = if right { &[0x0204, 0x0205] } else { &[0x0201, 0x0202] };
         for message in messages {
             let _ = unsafe {
                 windows::Win32::UI::WindowsAndMessaging::SendNotifyMessageW(

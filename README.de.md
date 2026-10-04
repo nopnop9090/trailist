@@ -33,7 +33,7 @@ der Rechte.
 |---|---|
 | **Was** | Der Windows-11-Tray-Überlauf als benannte und filterbare Liste statt als Raster aus 16×16-Piktogrammen. |
 | **Wer** | Geschrieben für einen sehr vollen Tray, mit einem KI-Assistenten als Tippkraft — darum geht es beim Badge unten. |
-| **Wann** | Version `0.5.3`. Der Build-Stempel wird beim Kompilieren eingebacken und im Footer des Panels, im Einstellungsdialog und für `trailist-probe theme` angezeigt. |
+| **Wann** | Version `0.5.4`. Der Build-Stempel wird beim Kompilieren eingebacken und im Footer des Panels, im Einstellungsdialog und für `trailist-probe theme` angezeigt. |
 | **Wie** | Eine kleine DLL in Explorer merkt sich jede `Shell_NotifyIcon`-Registrierung und leitet Hover und Klicks an dieses Fenster weiter. Ein React-Panel zeichnet die Liste. Hängt sich die DLL nicht ein, bleibt der bisherige UI-Automation-Weg, und das Panel sagt das. Die Einstellungen liegen in `config/settings.json` neben der Exe. |
 
 Der Einstellungsdialog, samt Badge und Version:
@@ -58,7 +58,10 @@ die Tooltips — sie stehen nur nirgends auf einmal. Genau das löst dieses Prog
 - Tastatur: `↑`/`↓` bewegen, `Enter` öffnet, `Esc` schließt
 - Rechtsklick auf eine Zeile öffnet das Kontextmenü des Symbols. Die Liste bleibt
   offen, bis daneben geklickt wird, ein zweiter Rechtsklick heißt also nicht, das
-  Panel erneut zu öffnen
+  Panel erneut zu öffnen. Ein Version-0-Symbol bekommt den Tastendruck und das
+  Loslassen; Discord und ZCode öffnen ihr Menü über den Tastendruck
+- Die Zeile Windows-Sicherheit öffnet die Windows-Sicherheit. Dieses Symbol
+  schickt seinen Callback nicht erneut, es gibt also keine Nachricht zum Weiterreichen
 - Ein Doppelklick wird als Doppelklick weitergereicht. Der Einfachklick wartet die
   Doppelklick-Zeit des Systems ab, damit ein Symbol, das sich per Doppelklick
   öffnet, und eines, das beim Einfachklick ein Menü zeigt, sich wie im Tray verhalten
@@ -217,7 +220,8 @@ Symbole, die in der sichtbaren Leiste angeheftet sind.
 Auf diesem Rechner kommt die Registrierung als 32-Bit-`NOTIFYICONDATA` in
 `WM_COPYDATA` an (`dwData == 1`, Signatur `0x34753423`). Ein Symbol, das nie
 `NIM_SETVERSION` gerufen hat, ist Version 0: `wParam` ist die Symbol-Id und
-`lParam` die Mausnachricht, ein Rechtsklick also `WM_RBUTTONUP`. Version 4, erst
+`lParam` die Mausnachricht, ein Rechtsklick also `WM_RBUTTONDOWN` und danach
+`WM_RBUTTONUP`. Version 4, erst
 nach `NIM_SETVERSION`, packt den Punkt in `wParam` und das Ereignis in die
 untere Hälfte von `lParam`. Die Version-4-Form an ein Version-0-Fenster schickt
 nichts aus.
